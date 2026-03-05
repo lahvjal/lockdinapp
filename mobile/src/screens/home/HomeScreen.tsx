@@ -13,6 +13,7 @@ import WaterScreen from '../water/WaterScreen';
 import SleepScreen from '../sleep/SleepScreen';
 import StreaksScreen from '../streaks/StreaksScreen';
 import SkipTokensScreen from '../skip-tokens/SkipTokensScreen';
+import PlanManagementScreen from '../plan/PlanManagementScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -68,6 +69,15 @@ export default function HomeScreen() {
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="view-dashboard" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Plans"
+        component={PlanManagementScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="calendar-check" size={size} color={color} />
           ),
         }}
       />

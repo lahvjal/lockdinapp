@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
 import { Text, Button, Card, TextInput, IconButton, Portal, Modal } from 'react-native-paper';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../../store/store';
@@ -7,6 +7,8 @@ import { supabase } from '../../services/supabase';
 import { logExerciseSet, startRestTimer, endWorkoutSession } from '../../store/slices/workoutSlice';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import RestTimerModal from '../../components/workout/RestTimerModal';
+import ExerciseSubstitutionModal from '../../components/workout/ExerciseSubstitutionModal';
+import { Exercise } from '../../types';
 
 interface ExerciseData {
   exercise_id: string;
@@ -25,6 +27,9 @@ export default function WorkoutSessionScreen() {
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [sets, setSets] = useState<Array<{ reps: string; weight: string; completed: boolean }>>([]);
   const [loading, setLoading] = useState(true);
+  const [substitutionModalVisible, setSubstitutionModalVisible] = useState(false);
+  const [substitutionScenario, setSubstitutionScenario] = useState<'swap' | 'equipment-unavailable'>('swap');
+  const [substitutionHistory, setSubstitutionHistory] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadExercises();
@@ -137,6 +142,62 @@ export default function WorkoutSessionScreen() {
     }
   };
 
+  const handleLongPressExercise = () => {
+    setSubstitutionScenario('swap');
+    setSubstitutionModalVisible(true);
+  };
+
+  const handleEquipmentUnavailable = () => {
+    setSubstitutionScenario('equipment-unavailable');
+    setSubstitutionModalVisible(true);
+  };
+
+  const handleSelectSubstitute = async (substituteExercise: Exercise) => {
+    if (!user || !activeSession) return;
+
+    try {
+      // Log the substitution in database
+      const { error } = await supabase
+        .from('exercise_substitutions')
+        .insert({
+          user_id: user.id,
+          workout_log_id: activeSession.workoutId,
+          original_exercise_id: exercises[currentExerciseIndex].exercise_id,
+          substitute_exercise_id: substituteExercise.id,
+          reason: substitutionScenario === 'equipment-unavailable' 
+            ? 'Equipment not available' 
+            : 'User preference',
+        });
+
+      if (error) throw error;
+
+      // Update current exercise in the session
+      const newExercises = [...exercises];
+      newExercises[currentExerciseIndex] = {
+        ...substituteExercise,
+        exercise_id: substituteExercise.id,
+        sets: newExercises[currentExerciseIndex].sets,
+        reps: newExercises[currentExerciseIndex].reps,
+        rest_seconds: newExercises[currentExerciseIndex].rest_seconds,
+      };
+      setExercises(newExercises);
+
+      // Track substitution history
+      setSubstitutionHistory({
+        ...substitutionHistory,
+        [exercises[currentExerciseIndex].exercise_id]: substituteExercise.id,
+      });
+
+      // Reset sets for new exercise
+      initializeSets(newExercises[currentExerciseIndex]);
+
+      Alert.alert('Success', `Exercise swapped to ${substituteExercise.name}`);
+    } catch (error) {
+      console.error('Error logging substitution:', error);
+      Alert.alert('Error', 'Failed to swap exercise');
+    }
+  };
+
   if (loading || exercises.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
@@ -160,7 +221,29 @@ export default function WorkoutSessionScreen() {
 
         <Text variant="headlineMedium" style={styles.exerciseName}>
           {currentExercise.name}
+          {substitutionHistory[currentExercise.exercise_id] && (
+            <Text style={styles.swapIcon}> 🔄</Text>
+          )}
         </Text>
+
+        <View style={styles.exerciseActions}>
+          <Button
+            mode="text"
+            onPress={handleEquipmentUnavailable}
+            icon="alert-circle-outline"
+            compact
+          >
+            Equipment Not Available
+          </Button>
+          <Button
+            mode="text"
+            onPress={handleLongPressExercise}
+            icon="swap-horizontal"
+            compact
+          >
+            Swap Exercise
+          </Button>
+        </View>
 
         {currentExercise.description && (
           <Text variant="bodyMedium" style={styles.description}>
@@ -259,6 +342,14 @@ export default function WorkoutSessionScreen() {
       </ScrollView>
 
       <RestTimerModal />
+
+      <ExerciseSubstitutionModal
+        visible={substitutionModalVisible}
+        onDismiss={() => setSubstitutionModalVisible(false)}
+        currentExercise={exercises[currentExerciseIndex]}
+        onSelectSubstitute={handleSelectSubstitute}
+        scenario={substitutionScenario}
+      />
     </SafeAreaView>
   );
 }
@@ -282,6 +373,14 @@ const styles = StyleSheet.create({
   },
   exerciseName: {
     fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  swapIcon: {
+    fontSize: 20,
+  },
+  exerciseActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 8,
   },
   description: {

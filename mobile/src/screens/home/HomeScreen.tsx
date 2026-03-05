@@ -12,6 +12,7 @@ import MealsScreen from '../meals/MealsScreen';
 import WaterScreen from '../water/WaterScreen';
 import SleepScreen from '../sleep/SleepScreen';
 import StreaksScreen from '../streaks/StreaksScreen';
+import SkipTokensScreen from '../skip-tokens/SkipTokensScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -112,6 +113,15 @@ export default function HomeScreen() {
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="fire" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Tokens"
+        component={SkipTokensScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="ticket" size={size} color={color} />
           ),
         }}
       />

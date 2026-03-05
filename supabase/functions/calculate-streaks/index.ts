@@ -84,6 +84,20 @@ async function calculateCategoryStreak(
   const startDateStr = startDate.toISOString().split('T')[0];
   const endDateStr = endDate.toISOString().split('T')[0];
 
+  // Get skip token usage for this category
+  const { data: skipTokenUsage } = await client
+    .from('skip_token_usage')
+    .select('date, skip_tokens!inner(user_id)')
+    .eq('skip_tokens.user_id', userId)
+    .eq('category', category)
+    .gte('date', startDateStr)
+    .lte('date', endDateStr);
+
+  // Mark skip token days as completed
+  skipTokenUsage?.forEach((usage: any) => {
+    dayLogs[usage.date] = true;
+  });
+
   switch (category) {
     case 'workout': {
       const { data } = await client

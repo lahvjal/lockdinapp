@@ -11,6 +11,7 @@ import WorkoutHomeScreen from '../workout/WorkoutHomeScreen';
 import MealsScreen from '../meals/MealsScreen';
 import WaterScreen from '../water/WaterScreen';
 import SleepScreen from '../sleep/SleepScreen';
+import StreaksScreen from '../streaks/StreaksScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -102,6 +103,15 @@ export default function HomeScreen() {
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="sleep" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Streaks"
+        component={StreaksScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="fire" size={size} color={color} />
           ),
         }}
       />

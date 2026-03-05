@@ -14,10 +14,11 @@ import SleepScreen from '../sleep/SleepScreen';
 import StreaksScreen from '../streaks/StreaksScreen';
 import SkipTokensScreen from '../skip-tokens/SkipTokensScreen';
 import PlanManagementScreen from '../plan/PlanManagementScreen';
+import NotificationSettingsScreen from '../settings/NotificationSettingsScreen';
 
 const Tab = createBottomTabNavigator();
 
-function DashboardScreen() {
+function DashboardScreen({ navigation }: any) {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const { activePlans } = useSelector((state: RootState) => state.plan);
@@ -37,12 +38,21 @@ function DashboardScreen() {
       </Text>
       
       <View style={styles.plansInfo}>
-        <Text variant="titleMedium">Active Plans:</Text>
+        <Text variant="titleMedium" style={styles.sectionTitle}>Active Plans:</Text>
         <Text>Workout: {activePlans.workout ? '✓' : '✗'}</Text>
         <Text>Meals: {activePlans.meal ? '✓' : '✗'}</Text>
         <Text>Water: {activePlans.water ? '✓' : '✗'}</Text>
         <Text>Sleep: {activePlans.sleep ? '✓' : '✗'}</Text>
       </View>
+
+      <Button 
+        mode="contained"
+        onPress={() => navigation.navigate('Settings')}
+        style={styles.button}
+        icon="cog"
+      >
+        Settings
+      </Button>
 
       <Button 
         mode="outlined" 
@@ -132,6 +142,15 @@ export default function HomeScreen() {
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="ticket" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Settings"
+        component={NotificationSettingsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="cog" size={size} color={color} />
           ),
         }}
       />

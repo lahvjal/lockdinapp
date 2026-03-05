@@ -48,10 +48,10 @@ CREATE TABLE public.plans (
   status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'archived')) DEFAULT 'active',
   config JSONB DEFAULT '{}',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user_id, type, status) WHERE status = 'active'
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX idx_plans_user_type_active ON public.plans(user_id, type) WHERE status = 'active';
 CREATE INDEX idx_plans_user_type_status ON public.plans(user_id, type, status);
 
 -- Workouts table
@@ -263,6 +263,21 @@ CREATE POLICY "Users can create own substitutions" ON public.exercise_substituti
 -- Meal slots policies
 CREATE POLICY "Users can view meal slots from own plans" ON public.meal_slots
   FOR SELECT USING (
+    plan_id IN (SELECT id FROM public.plans WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can create meal slots for own plans" ON public.meal_slots
+  FOR INSERT WITH CHECK (
+    plan_id IN (SELECT id FROM public.plans WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can update meal slots from own plans" ON public.meal_slots
+  FOR UPDATE USING (
+    plan_id IN (SELECT id FROM public.plans WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can delete meal slots from own plans" ON public.meal_slots
+  FOR DELETE USING (
     plan_id IN (SELECT id FROM public.plans WHERE user_id = auth.uid())
   );
 

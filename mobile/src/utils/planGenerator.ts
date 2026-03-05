@@ -166,7 +166,7 @@ export async function initializeStreaks(userId: string) {
 
   const { error } = await supabase
     .from('streaks')
-    .insert(streaks);
+    .upsert(streaks, { onConflict: 'user_id, category', ignoreDuplicates: true });
 
   if (error) throw error;
 }
@@ -188,6 +188,13 @@ export async function initializeSkipTokens(userId: string) {
 
 export async function completeOnboarding(userId: string, onboardingData: OnboardingData) {
   try {
+    // Clean up any plans from a previous partial/failed onboarding attempt
+    await supabase
+      .from('plans')
+      .delete()
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
     await createWorkoutPlan(userId, onboardingData);
     await createMealPlan(userId, onboardingData);
     await createWaterPlan(userId, onboardingData);

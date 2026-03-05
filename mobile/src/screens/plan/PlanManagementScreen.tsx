@@ -40,7 +40,7 @@ export default function PlanManagementScreen() {
         .from('plans')
         .select('*')
         .eq('user_id', user.id)
-        .eq('is_active', true);
+        .eq('status', 'active');
 
       if (activeError) throw activeError;
 
@@ -59,7 +59,7 @@ export default function PlanManagementScreen() {
         .from('plans')
         .select('*')
         .eq('user_id', user.id)
-        .eq('is_active', false)
+        .in('status', ['archived', 'completed'])
         .order('updated_at', { ascending: false })
         .limit(10);
 
@@ -158,8 +158,8 @@ export default function PlanManagementScreen() {
       const { error } = await supabase
         .from('plans')
         .update({ 
-          is_active: false,
-          data: { ...selectedPlan.data, archived_at: new Date().toISOString() }
+          status: 'archived',
+          config: { ...selectedPlan.config, archived_at: new Date().toISOString() }
         })
         .eq('id', selectedPlan.id);
 
@@ -187,11 +187,10 @@ export default function PlanManagementScreen() {
               const { error } = await supabase
                 .from('plans')
                 .update({ 
-                  is_active: false,
-                  data: { 
-                    ...plan.data, 
+                  status: 'completed',
+                  config: { 
+                    ...plan.config, 
                     completed_at: new Date().toISOString(),
-                    completion_status: 'completed'
                   }
                 })
                 .eq('id', plan.id);
@@ -301,7 +300,7 @@ export default function PlanManagementScreen() {
                   <View>
                     <Text variant="titleLarge">{plan.name || 'Unnamed Plan'}</Text>
                     <Text variant="bodySmall" style={styles.categoryText}>
-                      {plan.category.toUpperCase()}
+                      {plan.type?.toUpperCase()}
                     </Text>
                   </View>
                   <Chip 
@@ -387,7 +386,7 @@ export default function PlanManagementScreen() {
                 <Card.Content>
                   <Text variant="titleMedium">{plan.name || 'Unnamed Plan'}</Text>
                   <Text variant="bodySmall" style={styles.archivedText}>
-                    {plan.category.toUpperCase()} • Archived {new Date(plan.updated_at).toLocaleDateString()}
+                    {plan.type?.toUpperCase()} • Archived {new Date(plan.updated_at).toLocaleDateString()}
                   </Text>
                   {plan.data?.completion_status === 'completed' && (
                     <Chip style={styles.completedChip} textStyle={styles.completedChipText}>

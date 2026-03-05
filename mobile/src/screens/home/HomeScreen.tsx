@@ -8,6 +8,9 @@ import { RootState } from '../../store/store';
 import { supabase } from '../../services/supabase';
 import { signOut } from '../../store/slices/authSlice';
 import WorkoutHomeScreen from '../workout/WorkoutHomeScreen';
+import MealsScreen from '../meals/MealsScreen';
+import WaterScreen from '../water/WaterScreen';
+import SleepScreen from '../sleep/SleepScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -49,39 +52,6 @@ function DashboardScreen() {
   );
 }
 
-function MealsScreen() {
-  return (
-    <View style={styles.container}>
-      <Text variant="headlineMedium">Meals</Text>
-      <Text variant="bodyMedium" style={styles.comingSoon}>
-        Meal tracking coming soon
-      </Text>
-    </View>
-  );
-}
-
-function WaterScreen() {
-  return (
-    <View style={styles.container}>
-      <Text variant="headlineMedium">Water</Text>
-      <Text variant="bodyMedium" style={styles.comingSoon}>
-        Water tracking coming soon
-      </Text>
-    </View>
-  );
-}
-
-function SleepScreen() {
-  return (
-    <View style={styles.container}>
-      <Text variant="headlineMedium">Sleep</Text>
-      <Text variant="bodyMedium" style={styles.comingSoon}>
-        Sleep tracking coming soon
-      </Text>
-    </View>
-  );
-}
-
 export default function HomeScreen() {
   return (
     <Tab.Navigator
@@ -113,7 +83,7 @@ export default function HomeScreen() {
         component={MealsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="food-apple" size={size} color={color} />
+            <MaterialCommunityIcons name="silverware-fork-knife" size={size} color={color} />
           ),
         }}
       />

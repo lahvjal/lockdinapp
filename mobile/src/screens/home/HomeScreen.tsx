@@ -1,14 +1,20 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, Button } from 'react-native-paper';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../../store/store';
 import { supabase } from '../../services/supabase';
 import { signOut } from '../../store/slices/authSlice';
+import WorkoutHomeScreen from '../workout/WorkoutHomeScreen';
 
-export default function HomeScreen() {
+const Tab = createBottomTabNavigator();
+
+function DashboardScreen() {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
+  const { activePlans } = useSelector((state: RootState) => state.plan);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -18,17 +24,20 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <Text variant="headlineMedium" style={styles.title}>
-        Welcome to LockdIn!
+        Dashboard
       </Text>
       <Text variant="bodyLarge" style={styles.subtitle}>
         Hello, {user?.email}
       </Text>
-      <Text variant="bodyMedium" style={styles.description}>
-        Authentication successful! You're now signed in.
-      </Text>
-      <Text variant="bodySmall" style={styles.nextSteps}>
-        Next: Onboarding flow will be implemented here
-      </Text>
+      
+      <View style={styles.plansInfo}>
+        <Text variant="titleMedium">Active Plans:</Text>
+        <Text>Workout: {activePlans.workout ? '✓' : '✗'}</Text>
+        <Text>Meals: {activePlans.meal ? '✓' : '✗'}</Text>
+        <Text>Water: {activePlans.water ? '✓' : '✗'}</Text>
+        <Text>Sleep: {activePlans.sleep ? '✓' : '✗'}</Text>
+      </View>
+
       <Button 
         mode="outlined" 
         onPress={handleSignOut}
@@ -37,6 +46,96 @@ export default function HomeScreen() {
         Sign Out
       </Button>
     </View>
+  );
+}
+
+function MealsScreen() {
+  return (
+    <View style={styles.container}>
+      <Text variant="headlineMedium">Meals</Text>
+      <Text variant="bodyMedium" style={styles.comingSoon}>
+        Meal tracking coming soon
+      </Text>
+    </View>
+  );
+}
+
+function WaterScreen() {
+  return (
+    <View style={styles.container}>
+      <Text variant="headlineMedium">Water</Text>
+      <Text variant="bodyMedium" style={styles.comingSoon}>
+        Water tracking coming soon
+      </Text>
+    </View>
+  );
+}
+
+function SleepScreen() {
+  return (
+    <View style={styles.container}>
+      <Text variant="headlineMedium">Sleep</Text>
+      <Text variant="bodyMedium" style={styles.comingSoon}>
+        Sleep tracking coming soon
+      </Text>
+    </View>
+  );
+}
+
+export default function HomeScreen() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#1976D2',
+      }}
+    >
+      <Tab.Screen
+        name="Dashboard"
+        component={DashboardScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="view-dashboard" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Workout"
+        component={WorkoutHomeScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="dumbbell" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Meals"
+        component={MealsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="food-apple" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Water"
+        component={WaterScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="water" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Sleep"
+        component={SleepScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="sleep" size={size} color={color} />
+          ),
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
@@ -58,15 +157,16 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: 'center',
   },
-  description: {
-    color: '#333',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  nextSteps: {
-    color: '#999',
+  plansInfo: {
     marginBottom: 32,
-    textAlign: 'center',
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    width: '100%',
+  },
+  comingSoon: {
+    color: '#999',
+    marginTop: 16,
     fontStyle: 'italic',
   },
   button: {

@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
-    "version": "1.0.0",
+    "name": "LockdIn",
+    "slug": "lockdin-app",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,19 +12,27 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lockdin.app",
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "LockdIn needs access to read your health data to track workouts and sync sleep information.",
+        "NSHealthUpdateUsageDescription": "LockdIn needs access to write workout data to your Health app."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#ffffff"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.lockdin.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "lockdinapp",
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

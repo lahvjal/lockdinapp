@@ -19,6 +19,7 @@ export interface WeekDay {
   date: Date;
   isToday: boolean;
   hasLog: boolean;
+  isPartialLog: boolean;
   isFuture: boolean;
   isRestDay: boolean;
   plannedWorkoutName: string | null;
@@ -64,6 +65,8 @@ interface WeekViewStripProps {
   scheduledPlans: any[];
   /** Dates that have a workout log this week, as Date.toDateString() keys */
   currentWeekLogDates: Set<string>;
+  /** Subset of currentWeekLogDates where only some (not all) planned exercises were logged */
+  partialLogDates?: Set<string>;
   /** Called when a day cell is tapped */
   onDayPress?: (day: WeekDay) => void;
   /** User ID — needed to fetch logs for past weeks */
@@ -79,6 +82,7 @@ export default function WeekViewStrip({
   planEndDate,
   scheduledPlans,
   currentWeekLogDates,
+  partialLogDates,
   onDayPress,
   userId,
 }: WeekViewStripProps) {
@@ -103,19 +107,34 @@ export default function WeekViewStrip({
 
     // Fetch logs for past weeks; current week comes from parent's currentWeekLogDates
     let logDates: Set<string>;
+    let pastPartialDates = new Set<string>();
     if (weekOffset === 0) {
       logDates = currentWeekLogDates;
     } else if (weekOffset < 0) {
-      // Past week — query workout_logs for dates in range
+      // Past week — query workout_logs for dates in range, including exercise_id for partial detection
       const from = targetMonday.toISOString().split('T')[0];
       const to = new Date(targetMonday.getTime() + 6 * 86400000).toISOString().split('T')[0];
       const { data: logs } = await supabase
         .from('workout_logs')
-        .select('logged_at')
+        .select('logged_at, exercise_id')
         .eq('user_id', userId)
         .gte('logged_at', from)
         .lte('logged_at', to + 'T23:59:59');
-      logDates = new Set((logs ?? []).map((l: any) => new Date(l.logged_at).toDateString()));
+      const logsByDate = new Map<string, Set<string>>();
+      for (const l of logs ?? []) {
+        const ds = new Date(l.logged_at).toDateString();
+        if (!logsByDate.has(ds)) logsByDate.set(ds, new Set());
+        logsByDate.get(ds)!.add(l.exercise_id);
+      }
+      logDates = new Set(logsByDate.keys());
+      for (const [ds, exIds] of logsByDate) {
+        const weekday = toMonZero(new Date(ds).getDay());
+        const row = allWorkoutRows.find((w: any) => w.day_of_week === weekday);
+        const plannedCount = row ? getActiveVersion(row.exercises ?? []).length : 0;
+        if (plannedCount > 0 && exIds.size < plannedCount) {
+          pastPartialDates.add(ds);
+        }
+      }
     } else {
       logDates = new Set();
     }
@@ -172,11 +191,16 @@ export default function WeekViewStrip({
         isOutOfPlan = true;
       }
 
+      const dateStr = date.toDateString();
+      const isPartialLog = weekOffset === 0
+        ? (partialLogDates?.has(dateStr) ?? false)
+        : pastPartialDates.has(dateStr);
       return {
         label,
         date,
         isToday: date.toDateString() === today.toDateString(),
-        hasLog: logDates.has(date.toDateString()),
+        hasLog: logDates.has(dateStr),
+        isPartialLog,
         isFuture: date > today,
         isRestDay,
         plannedWorkoutName,
@@ -257,22 +281,25 @@ export default function WeekViewStrip({
               </Text>
               <View style={[
                 s.dayDot,
-                d.isToday && !d.isOutOfPlan && { borderColor: C.orange, borderWidth: 1.5 },
-                d.hasLog && { backgroundColor: C.orange },
+                d.isToday && !d.hasLog && !d.isOutOfPlan && { borderColor: C.orange, borderWidth: 1.5 },
+                d.hasLog && !d.isPartialLog && { backgroundColor: C.orange },
+                d.hasLog && d.isPartialLog && { backgroundColor: '#1A1200', borderColor: C.orange, borderWidth: 1 },
                 !d.hasLog && d.isOutOfPlan && { backgroundColor: '#141414', borderColor: '#222', borderWidth: 1 },
                 !d.hasLog && !d.isOutOfPlan && d.isScheduledPlan && { backgroundColor: '#1E1E3A', borderColor: '#6366F1', borderWidth: 1.5 },
                 !d.hasLog && !d.isOutOfPlan && !d.isScheduledPlan && d.isRestDay && !d.isFuture && { backgroundColor: '#1A1A2E', borderColor: '#3B3B6B', borderWidth: 1 },
                 !d.hasLog && !d.isOutOfPlan && !d.isScheduledPlan && d.isRestDay && d.isFuture && { backgroundColor: '#12121E', borderColor: '#252540', borderWidth: 1 },
               ]}>
-                {d.hasLog
+                {d.hasLog && !d.isPartialLog
                   ? <MaterialCommunityIcons name="check" size={12} color="#000" />
-                  : d.isOutOfPlan
-                    ? <Text style={s.dayDash}>·</Text>
-                    : d.isScheduledPlan
-                      ? <MaterialCommunityIcons name="calendar-clock" size={11} color="#6366F1" />
-                      : d.isRestDay
-                        ? <MaterialCommunityIcons name="sleep" size={13} color={d.isFuture ? '#333366' : '#5555AA'} />
-                        : <Text style={[s.dayDash, d.isToday && { color: C.orange }]}>—</Text>
+                  : d.hasLog && d.isPartialLog
+                    ? <View style={s.partialDot} />
+                    : d.isOutOfPlan
+                      ? <Text style={s.dayDash}>·</Text>
+                      : d.isScheduledPlan
+                        ? <MaterialCommunityIcons name="calendar-clock" size={11} color="#6366F1" />
+                        : d.isRestDay
+                          ? <MaterialCommunityIcons name="sleep" size={13} color={d.isFuture ? '#333366' : '#5555AA'} />
+                          : <Text style={[s.dayDash, d.isToday && { color: C.orange }]}>—</Text>
                 }
               </View>
             </TouchableOpacity>
@@ -296,6 +323,10 @@ export default function WeekViewStrip({
         <View style={s.legendItem}>
           <View style={[s.legendDot, { backgroundColor: C.orange }]} />
           <Text style={s.legendText}>Logged</Text>
+        </View>
+        <View style={s.legendItem}>
+          <View style={[s.legendDot, { backgroundColor: '#1A1200', borderWidth: 1, borderColor: C.orange }]} />
+          <Text style={s.legendText}>Partial</Text>
         </View>
         <View style={s.legendItem}>
           <View style={[s.legendDot, { backgroundColor: '#3B3B6B' }]} />
@@ -342,6 +373,7 @@ const s = StyleSheet.create({
     backgroundColor: '#1A1A1C',
   },
   dayDash: { color: '#333', fontSize: 13, fontWeight: '700' },
+  partialDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F59E0B' },
   backToNow: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     alignSelf: 'center', marginTop: 8,

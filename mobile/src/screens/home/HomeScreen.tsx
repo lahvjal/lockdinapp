@@ -76,6 +76,10 @@ interface DashboardData {
   completedExerciseIds: string[];
   /** Maps exercise_id → { logId, sets_data[] } for exercises already logged today */
   completedExerciseLogs: Record<string, { logId: string; setsData: any[] }>;
+  /** Date strings (toDateString) for every day this week that has a workout log */
+  weekLogDates: Set<string>;
+  /** Subset of weekLogDates where only some planned exercises were logged */
+  weekPartialLogDates: Set<string>;
   mealSlotsCount: number;
   mealsLoggedCount: number;
   waterGlasses: number;
@@ -180,6 +184,8 @@ function DashboardScreen() {
     exerciseNames: {},
     completedExerciseIds: [],
     completedExerciseLogs: {},
+    weekLogDates: new Set(),
+    weekPartialLogDates: new Set(),
     mealSlotsCount: 0,
     mealsLoggedCount: 0,
     waterGlasses: 0,
@@ -265,6 +271,8 @@ function DashboardScreen() {
       let exerciseNames: Record<string, string> = {};
       let completedExerciseIds: string[] = [];
       let completedExerciseLogs: Record<string, { logId: string; setsData: any[] }> = {};
+      let weekLogDates: Set<string> = new Set();
+      let weekPartialLogDates: Set<string> = new Set();
 
       if (activePlans.workout) {
         // Fetch all workout day rows for the plan (sorted by day_of_week)
@@ -349,6 +357,40 @@ function DashboardScreen() {
             }, {});
           }
         }
+
+        // Fetch all workout_logs for the current Mon–Sun to power the WeekViewStrip
+        if (activePlans.workout) {
+          const monday = new Date(today);
+          const jsDow = today.getDay();
+          const diffToMonday = jsDow === 0 ? -6 : 1 - jsDow;
+          monday.setDate(today.getDate() + diffToMonday);
+          monday.setHours(0, 0, 0, 0);
+          const sunday = new Date(monday);
+          sunday.setDate(monday.getDate() + 6);
+          sunday.setHours(23, 59, 59, 999);
+          const { data: weekLogs } = await supabase
+            .from('workout_logs')
+            .select('logged_at, exercise_id')
+            .eq('user_id', user.id)
+            .gte('logged_at', monday.toISOString())
+            .lte('logged_at', sunday.toISOString());
+          const toMonZero = (jsDow: number) => jsDow === 0 ? 6 : jsDow - 1;
+          const logsByDate = new Map<string, Set<string>>();
+          for (const l of weekLogs ?? []) {
+            const ds = new Date(l.logged_at).toDateString();
+            if (!logsByDate.has(ds)) logsByDate.set(ds, new Set());
+            logsByDate.get(ds)!.add(l.exercise_id);
+          }
+          weekLogDates = new Set(logsByDate.keys());
+          for (const [ds, exIds] of logsByDate) {
+            const weekday = toMonZero(new Date(ds).getDay());
+            const row = allWorkoutRows.find((w: any) => w.day_of_week === weekday);
+            const plannedCount = row ? getActiveVersion(row.exercises ?? []).length : 0;
+            if (plannedCount > 0 && exIds.size < plannedCount) {
+              weekPartialLogDates.add(ds);
+            }
+          }
+        }
       }
 
       // Meals
@@ -419,6 +461,8 @@ function DashboardScreen() {
         exerciseNames,
         completedExerciseIds,
         completedExerciseLogs,
+        weekLogDates,
+        weekPartialLogDates,
         mealSlotsCount,
         mealsLoggedCount,
         waterGlasses,
@@ -544,9 +588,8 @@ function DashboardScreen() {
           planStartDate={data.planStartDate}
           planEndDate={data.planEndDate}
           scheduledPlans={scheduledPlans}
-          currentWeekLogDates={new Set(
-            data.completedExerciseIds.length > 0 ? [new Date().toDateString()] : []
-          )}
+          currentWeekLogDates={data.weekLogDates}
+          partialLogDates={data.weekPartialLogDates}
           userId={user?.id ?? ''}
         />
 

@@ -37,8 +37,9 @@ export interface Plan {
   duration_mode: 'indefinite' | 'fixed' | 'check_in';
   start_date: string;
   end_date?: string;
-  status: 'active' | 'completed' | 'archived';
+  status: 'active' | 'completed' | 'archived' | 'scheduled';
   config: Record<string, any>;
+  group_id?: string;
   created_at: string;
   updated_at: string;
 }

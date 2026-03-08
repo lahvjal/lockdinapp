@@ -8,11 +8,13 @@ interface PlanState {
     water?: Plan;
     sleep?: Plan;
   };
+  scheduledPlans: Plan[];
   loading: boolean;
 }
 
 const initialState: PlanState = {
   activePlans: {},
+  scheduledPlans: [],
   loading: false,
 };
 
@@ -29,11 +31,14 @@ const planSlice = createSlice({
     removePlan: (state, action: PayloadAction<'workout' | 'meal' | 'water' | 'sleep'>) => {
       delete state.activePlans[action.payload];
     },
+    setScheduledPlans: (state, action: PayloadAction<Plan[]>) => {
+      state.scheduledPlans = action.payload;
+    },
     setLoading: (state, action: PayloadAction<boolean>) => {
       state.loading = action.payload;
     },
   },
 });
 
-export const { setActivePlans, setActivePlan, removePlan, setLoading } = planSlice.actions;
+export const { setActivePlans, setActivePlan, removePlan, setScheduledPlans, setLoading } = planSlice.actions;
 export default planSlice.reducer;

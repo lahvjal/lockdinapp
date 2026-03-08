@@ -10,11 +10,17 @@ import DietStep from './steps/DietStep';
 import PlanSetupStep from './steps/PlanSetupStep';
 import ReviewStep from './steps/ReviewStep';
 import { OnboardingData } from '../../utils/onboardingConfig';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { setOnboarded } from '../../store/slices/authSlice';
+import { setActivePlans } from '../../store/slices/planSlice';
+import { setStreaks } from '../../store/slices/streakSlice';
+import { supabase } from '../../services/supabase';
+import { RootState } from '../../store/store';
+import { Plan, Streak } from '../../types';
 
 export default function OnboardingScreen() {
   const dispatch = useDispatch();
+  const { user } = useSelector((state: RootState) => state.auth);
   const [currentStep, setCurrentStep] = useState(0);
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({});
 
@@ -29,7 +35,44 @@ export default function OnboardingScreen() {
     setCurrentStep(currentStep - 1);
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    // Load freshly created plans into Redux before navigating to home
+    if (user) {
+      const { data: plans } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active');
+
+      if (plans) {
+        const activePlans: { workout?: Plan; meal?: Plan; water?: Plan; sleep?: Plan } = {};
+        plans.forEach((plan: Plan) => {
+          if (plan.type === 'workout') activePlans.workout = plan;
+          else if (plan.type === 'meal') activePlans.meal = plan;
+          else if (plan.type === 'water') activePlans.water = plan;
+          else if (plan.type === 'sleep') activePlans.sleep = plan;
+        });
+        dispatch(setActivePlans(activePlans));
+      }
+
+      const { data: streakRows } = await supabase
+        .from('streaks')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (streakRows) {
+        const streakMap: Record<string, Streak> = {};
+        streakRows.forEach((s: Streak) => { streakMap[s.category] = s; });
+        dispatch(setStreaks({
+          workout: streakMap.workout ?? null,
+          meal: streakMap.meal ?? null,
+          water: streakMap.water ?? null,
+          sleep: streakMap.sleep ?? null,
+          overall: streakMap.overall ?? null,
+        }));
+      }
+    }
+
     dispatch(setOnboarded(true));
   };
 

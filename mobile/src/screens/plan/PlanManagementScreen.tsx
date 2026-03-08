@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, Platform, LayoutAnimation,
-  UIManager, Alert, Modal,
+  UIManager, Alert, Modal, Animated, PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -257,7 +257,7 @@ function Step3b_CustomSplit({ days, onChange }: {
   days: string[]; onChange: (days: string[]) => void;
 }) {
   const setCount = (n: number) => {
-    const next = Array.from({ length: n }, (_, i) => days[i] ?? `Day ${i + 1}`);
+    const next = Array.from({ length: n }, (_, i) => days[i] ?? `Workout ${i + 1}`);
     onChange(next);
   };
   const setName = (i: number, val: string) => {
@@ -298,7 +298,7 @@ function Step3b_CustomSplit({ days, onChange }: {
             <TextInput
               value={name}
               onChangeText={v => setName(i, v)}
-              placeholder={`Day ${i + 1} name…`}
+              placeholder={`Workout ${i + 1} name…`}
               placeholderTextColor={C.textDim}
               maxLength={24}
               style={s.dayNameInput}
@@ -310,6 +310,175 @@ function Step3b_CustomSplit({ days, onChange }: {
       <Text style={s.dayHint}>
         e.g. "Push", "Pull", "Legs", "Upper Body", "Chest & Back"
       </Text>
+    </View>
+  );
+}
+
+// ─── WeekSlotStrip ────────────────────────────────────────────────────────────
+
+const WEEK_SLOT_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+interface WeekSlotStripProps {
+  weekAssignments: (number | null)[];
+  workoutDays: WorkoutDayConfig[];
+  onTapSlot: (slotIdx: number) => void;
+  onSwap: (fromSlot: number, toSlot: number) => void;
+  onUnassign: (slotIdx: number) => void;
+}
+
+function WeekSlotStrip({ weekAssignments, workoutDays, onTapSlot, onSwap, onUnassign }: WeekSlotStripProps) {
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [activeDragSlot, setActiveDragSlot] = useState(-1);
+  const [hoverSlot, setHoverSlot] = useState(-1);
+
+  // Ghost card animation values (built-in RN Animated — no native modules needed)
+  const ghostTranslateX = useRef(new Animated.Value(0)).current;
+  const ghostOpacity = useRef(new Animated.Value(0)).current;
+  const ghostScale = useRef(new Animated.Value(1)).current;
+
+  // Refs so PanResponder callbacks always have the latest values
+  const slotWRef = useRef(0);
+  const onSwapRef = useRef(onSwap);
+  useEffect(() => { onSwapRef.current = onSwap; }, [onSwap]);
+
+  const showGhost = (startX: number) => {
+    ghostTranslateX.setValue(startX);
+    Animated.parallel([
+      Animated.timing(ghostOpacity, { toValue: 0.95, duration: 120, useNativeDriver: true }),
+      Animated.spring(ghostScale, { toValue: 1.07, useNativeDriver: true, speed: 20, bounciness: 4 }),
+    ]).start();
+  };
+
+  const hideGhost = () => {
+    Animated.parallel([
+      Animated.timing(ghostOpacity, { toValue: 0, duration: 100, useNativeDriver: true }),
+      Animated.spring(ghostScale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 4 }),
+    ]).start();
+  };
+
+  // Create one PanResponder per slot — stable refs, updated via slotWRef/onSwapRef
+  const panResponders = useMemo(
+    () =>
+      WEEK_SLOT_LABELS.map((_, slotIdx) =>
+        PanResponder.create({
+          // Only intercept when horizontal movement dominates (let ScrollView handle vertical)
+          onMoveShouldSetPanResponder: (_, gs) =>
+            Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 6,
+          onPanResponderGrant: () => {
+            const sw = slotWRef.current;
+            showGhost(slotIdx * sw);
+            setActiveDragSlot(slotIdx);
+          },
+          onPanResponderMove: (_, gs) => {
+            const sw = slotWRef.current;
+            const rawLeft = slotIdx * sw + gs.dx;
+            ghostTranslateX.setValue(Math.max(0, Math.min(rawLeft, sw * 6)));
+            setHoverSlot(Math.min(6, Math.max(0, Math.round(rawLeft / sw))));
+          },
+          onPanResponderRelease: (_, gs) => {
+            const sw = slotWRef.current;
+            const rawLeft = slotIdx * sw + gs.dx;
+            const target = Math.min(6, Math.max(0, Math.round(rawLeft / sw)));
+            hideGhost();
+            setActiveDragSlot(-1);
+            setHoverSlot(-1);
+            if (target !== slotIdx) onSwapRef.current(slotIdx, target);
+          },
+          onPanResponderTerminate: () => {
+            hideGhost();
+            setActiveDragSlot(-1);
+            setHoverSlot(-1);
+          },
+        }),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const slotW = containerWidth > 0 ? containerWidth / 7 : 0;
+
+  const ghostDayIdx = activeDragSlot >= 0 ? weekAssignments[activeDragSlot] : null;
+  const ghostWorkout = ghostDayIdx != null ? workoutDays[ghostDayIdx] : null;
+
+  return (
+    <View
+      onLayout={(e) => {
+        const w = e.nativeEvent.layout.width;
+        setContainerWidth(w);
+        slotWRef.current = w / 7;
+      }}
+      style={s.weekSlotContainer}
+    >
+      {WEEK_SLOT_LABELS.map((label, i) => {
+        const assignedDayIdx = weekAssignments[i];
+        const workout = assignedDayIdx != null ? workoutDays[assignedDayIdx] : null;
+        const isHovered = hoverSlot === i && activeDragSlot !== -1 && activeDragSlot !== i;
+        const isDragged = activeDragSlot === i;
+
+        return (
+          <View key={i} style={[s.weekSlotCol, slotW > 0 && { width: slotW }]}>
+            <Text style={s.weekSlotLabel}>{label}</Text>
+
+            {workout != null ? (
+              <View
+                style={[
+                  s.weekSlotCard,
+                  isDragged && s.weekSlotCardDragging,
+                  isHovered && s.weekSlotCardHovered,
+                ]}
+                {...panResponders[i].panHandlers}
+              >
+                <View style={s.weekSlotBadge}>
+                  <Text style={s.weekSlotBadgeText}>{(assignedDayIdx ?? 0) + 1}</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => onUnassign(i)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={s.weekSlotUnassign}
+                >
+                  <MaterialCommunityIcons name="close-circle" size={13} color="#555" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[s.weekSlotEmpty, isHovered && s.weekSlotEmptyHovered]}
+                onPress={() => onTapSlot(i)}
+                activeOpacity={0.6}
+              >
+                <MaterialCommunityIcons
+                  name="plus"
+                  size={16}
+                  color={isHovered ? C.orange : '#383838'}
+                />
+                <Text style={[s.weekSlotRestLabel, isHovered && { color: C.orange + 'AA' }]}>
+                  REST
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        );
+      })}
+
+      {/* Floating ghost card that follows the finger during drag */}
+      {ghostWorkout != null && slotW > 0 && (
+        <Animated.View
+          style={[
+            s.weekSlotCard,
+            s.weekSlotGhost,
+            {
+              width: slotW,
+              top: 22,
+              opacity: ghostOpacity,
+              transform: [{ translateX: ghostTranslateX }, { scale: ghostScale }],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View style={s.weekSlotBadge}>
+            <Text style={s.weekSlotBadgeText}>{(ghostDayIdx ?? 0) + 1}</Text>
+          </View>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -358,10 +527,12 @@ const EQ_CATS = [
   { key: 'other',      label: 'Other',     icon: 'dots-horizontal' },
 ] as const;
 
-function ConfigureDays({ days, onChange, userId }: {
+function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignmentsChange }: {
   days: WorkoutDayConfig[];
   onChange: (d: WorkoutDayConfig[]) => void;
   userId: string;
+  weekAssignments: (number | null)[];
+  onWeekAssignmentsChange: (a: (number | null)[]) => void;
 }) {
   const [expandedIdx, setExpandedIdx] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -423,7 +594,7 @@ function ConfigureDays({ days, onChange, userId }: {
     if (days.length >= MAX_DAYS) return;
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     const newIdx = days.length;
-    onChange([...days, { name: `Day ${newIdx + 1}`, exercises: [] }]);
+    onChange([...days, { name: `Workout ${newIdx + 1}`, exercises: [] }]);
     setExpandedIdx(newIdx);
     setSearchQuery('');
   };
@@ -522,15 +693,46 @@ function ConfigureDays({ days, onChange, userId }: {
     }
   };
 
+  // ── Week slot handlers ──────────────────────────────────────────────────────
+  const handleTapSlot = (slotIdx: number) => {
+    if (weekAssignments[slotIdx] != null) return; // already occupied
+    const nextUnassigned = days.findIndex((_, i) => !weekAssignments.includes(i));
+    if (nextUnassigned === -1) return; // all assigned
+    onWeekAssignmentsChange(weekAssignments.map((v, i) => (i === slotIdx ? nextUnassigned : v)));
+  };
+
+  const handleSwap = (fromSlot: number, toSlot: number) => {
+    const next = [...weekAssignments];
+    [next[fromSlot], next[toSlot]] = [next[toSlot], next[fromSlot]];
+    onWeekAssignmentsChange(next);
+  };
+
+  const handleUnassign = (slotIdx: number) => {
+    onWeekAssignmentsChange(weekAssignments.map((v, i) => (i === slotIdx ? null : v)));
+  };
+
   return (
     <View>
-      <Text style={s.stepTitle}>CONFIGURE YOUR DAYS</Text>
+      <Text style={s.stepTitle}>CONFIGURE YOUR WORKOUTS</Text>
       {days.some(d => d.exercises.length > 0)
-        ? <Text style={s.stepSub}>We've pre-filled exercises for each day. Swap, remove, or add more as you like.</Text>
-        : <Text style={s.stepSub}>Add exercises to each session. Tap a day to expand. Use + ADD DAY to add more days.</Text>
+        ? <Text style={s.stepSub}>We've pre-filled exercises for each workout. Swap, remove, or add more as you like.</Text>
+        : <Text style={s.stepSub}>Add exercises to each workout. Tap one to expand. Use + ADD WORKOUT to add more.</Text>
       }
 
-      <View style={{ gap: 8, marginTop: 18 }}>
+      {/* Week schedule assignment */}
+      <Text style={s.weekSlotSectionLabel}>WEEK SCHEDULE</Text>
+      <Text style={s.weekSlotSectionHint}>Tap a slot to assign the next workout. Long-press a card to drag it.</Text>
+      <WeekSlotStrip
+        weekAssignments={weekAssignments}
+        workoutDays={days}
+        onTapSlot={handleTapSlot}
+        onSwap={handleSwap}
+        onUnassign={handleUnassign}
+      />
+
+      {/* Workout accordion list */}
+      <Text style={s.weekSlotSectionLabel}>WORKOUTS</Text>
+      <View style={{ gap: 8, marginTop: 8 }}>
         {days.map((day, dayIdx) => {
           const isOpen = expandedIdx === dayIdx;
           const isPrefilled = day.exercises.length > 0;
@@ -754,7 +956,7 @@ function ConfigureDays({ days, onChange, userId }: {
       {days.length < MAX_DAYS && (
         <TouchableOpacity style={s.addDayBtn} onPress={addDay} activeOpacity={0.75}>
           <MaterialCommunityIcons name="plus" size={15} color={C.orange} />
-          <Text style={s.addDayBtnText}>ADD DAY</Text>
+          <Text style={s.addDayBtnText}>ADD WORKOUT</Text>
         </TouchableOpacity>
       )}
 
@@ -883,17 +1085,14 @@ function formatShortDate(d: Date): string {
 }
 
 function Step_Schedule({
-  startDate, restDays, trainingDayCount,
+  startDate,
   currentPlanEndDate, currentPlanName,
-  onStartDate, onRestDays, lockStartDate,
+  onStartDate, lockStartDate,
 }: {
   startDate: Date;
-  restDays: number[];
-  trainingDayCount: number;
   currentPlanEndDate?: Date;
   currentPlanName?: string;
   onStartDate: (d: Date) => void;
-  onRestDays: (r: number[]) => void;
   lockStartDate?: boolean;
 }) {
   const today = new Date(); today.setHours(0,0,0,0);
@@ -922,16 +1121,6 @@ function Step_Schedule({
   // total cells — round up to complete rows
   const totalCells = Math.ceil((leadingBlanks + daysInMonth) / 7) * 7;
 
-  // Max rest days
-  const maxRestDays = trainingDayCount > 0 ? Math.max(0, 7 - trainingDayCount) : 7;
-  const atLimit = restDays.length >= maxRestDays;
-
-  const toggleRestDay = (dayIdx: number) => {
-    const isCurrentlyRest = restDays.includes(dayIdx);
-    if (!isCurrentlyRest && atLimit) return;
-    onRestDays(isCurrentlyRest ? restDays.filter(d => d !== dayIdx) : [...restDays, dayIdx]);
-  };
-
   const isSelected = (d: Date) => d.toDateString() === startDate.toDateString();
 
   const isBlocked = (d: Date) => {
@@ -948,7 +1137,7 @@ function Step_Schedule({
   return (
     <View>
       <Text style={s.stepTitle}>SCHEDULE</Text>
-      <Text style={s.stepSub}>Pick when your plan starts and which days are rest days.</Text>
+      <Text style={s.stepSub}>Pick when your plan starts. Rest days are set by your week schedule in the previous step.</Text>
 
       {/* ── Current Plan Overlap Warning ── */}
       {currentPlanEndDate && (
@@ -1051,58 +1240,6 @@ function Step_Schedule({
         </View>
       )}
 
-      {/* ── Rest Days ── */}
-      <View style={s.schedRestHeader}>
-        <Text style={[s.schedSectionLabel, { marginTop: 0 }]}>REST DAYS</Text>
-        <View style={s.schedRestQuota}>
-          <Text style={s.schedRestQuotaNum}>{restDays.length}</Text>
-          <Text style={s.schedRestQuotaSep}>/</Text>
-          <Text style={s.schedRestQuotaMax}>{maxRestDays}</Text>
-        </View>
-      </View>
-      <Text style={s.schedRestSub}>
-        {trainingDayCount > 0
-          ? `Your ${trainingDayCount}-day plan leaves ${maxRestDays} rest day${maxRestDays !== 1 ? 's' : ''} per week.`
-          : 'Tap the days you won\'t be training each week.'}
-      </Text>
-      <View style={s.schedRestRow}>
-        {WEEK_DAY_NAMES.map((name, i) => {
-          const isRest = restDays.includes(i);
-          const isDisabled = !isRest && atLimit;
-          return (
-            <TouchableOpacity
-              key={i}
-              onPress={() => toggleRestDay(i)}
-              disabled={isDisabled}
-              activeOpacity={0.75}
-              style={[
-                s.schedRestBtn,
-                isRest && s.schedRestBtnActive,
-                isDisabled && s.schedRestBtnDisabled,
-              ]}
-            >
-              <Text style={[
-                s.schedRestBtnLabel,
-                isRest && s.schedRestBtnLabelActive,
-                isDisabled && { color: '#2A2A2E' },
-              ]}>{name}</Text>
-              {isRest && (
-                <MaterialCommunityIcons name="sleep" size={11} color="#5555AA" style={{ marginTop: 2 }} />
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      {restDays.length > 0 && (
-        <Text style={s.schedRestSummary}>
-          Rest: {restDays.sort((a, b) => a - b).map(i => WEEK_DAY_FULL[i]).join(', ')}
-        </Text>
-      )}
-      {atLimit && maxRestDays > 0 && (
-        <Text style={s.schedRestLimitNote}>
-          Max {maxRestDays} rest day{maxRestDays !== 1 ? 's' : ''} for a {trainingDayCount}-day plan — tap a selected day to unselect it.
-        </Text>
-      )}
     </View>
   );
 }
@@ -1126,7 +1263,7 @@ function Step5_Review({ form, isFutureStart, isEditing }: {
     name: string; categories: string[]; split: string; duration: string;
     workoutDays: WorkoutDayConfig[];
     mealSlots: MealSlotConfig[]; waterGoalGlasses: number; sleepGoalHours: number;
-    startDate: Date; restDays: number[];
+    startDate: Date; weekAssignments: (number | null)[];
   };
   isFutureStart: boolean;
   isEditing?: boolean;
@@ -1134,7 +1271,7 @@ function Step5_Review({ form, isFutureStart, isEditing }: {
   const catMap = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
   const isCustom = form.split === 'custom';
   const splitLabel = isCustom
-    ? `Custom · ${form.workoutDays.length} days/week`
+    ? `Custom · ${form.workoutDays.length} workouts/week`
     : (SPLITS.find(sp => sp.id === form.split)?.label ?? '—');
   const durLabel = DURATIONS.find(d => d.id === form.duration)?.label ?? '—';
   const totalExercises = form.workoutDays.reduce((sum, d) => sum + d.exercises.length, 0);
@@ -1142,9 +1279,18 @@ function Step5_Review({ form, isFutureStart, isEditing }: {
   const startLabel = form.startDate.toDateString() === today.toDateString()
     ? 'Today'
     : form.startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const restLabel = form.restDays.length > 0
-    ? form.restDays.sort((a, b) => a - b).map(i => WEEK_DAY_FULL[i]).join(', ')
+
+  // Derive rest days and schedule from weekAssignments
+  const restDays = [0,1,2,3,4,5,6].filter(d => form.weekAssignments[d] === null);
+  const restLabel = restDays.length > 0
+    ? restDays.map(i => WEEK_DAY_FULL[i]).join(', ')
     : 'None';
+  const scheduleLabel = form.weekAssignments
+    .map((dayIdx, weekday) =>
+      dayIdx != null ? `${WEEK_DAY_NAMES[weekday]}: ${form.workoutDays[dayIdx]?.name ?? `Workout ${dayIdx + 1}`}` : null,
+    )
+    .filter(Boolean)
+    .join(' · ') || '—';
 
   return (
     <View>
@@ -1188,7 +1334,8 @@ function Step5_Review({ form, isFutureStart, isEditing }: {
         { label: 'STARTS', value: startLabel },
         ...(form.categories.includes('workout') ? [
           { label: 'SPLIT', value: splitLabel },
-          { label: 'EXERCISES', value: totalExercises > 0 ? `${totalExercises} across ${form.workoutDays.length} days` : 'None set — add later' },
+          { label: 'SCHEDULE', value: scheduleLabel },
+          { label: 'EXERCISES', value: totalExercises > 0 ? `${totalExercises} across ${form.weekAssignments.filter(v => v !== null).length} days` : 'None set — add later' },
           { label: 'REST DAYS', value: restLabel },
         ] : []),
         ...(form.categories.includes('meal') ? [
@@ -1219,7 +1366,7 @@ async function runCreatePlans(
     name: string; categories: string[]; split: string; duration: string;
     workoutDays: WorkoutDayConfig[];
     mealSlots: MealSlotConfig[]; waterGoalGlasses: number; sleepGoalHours: number;
-    startDate: Date; restDays: number[];
+    startDate: Date; weekAssignments: (number | null)[];
   },
   dispatch: any,
 ) {
@@ -1267,7 +1414,7 @@ async function runCreatePlans(
         ? {
             split: isCustomSplit ? 'CUSTOM' : splitKey,
             custom_days: isCustomSplit ? form.workoutDays.map(d => d.name) : undefined,
-            rest_day_versions: [{ effective_from: startDateStr, rest_days: form.restDays }],
+            rest_day_versions: [{ effective_from: startDateStr, rest_days: [0,1,2,3,4,5,6].filter(d => form.weekAssignments[d] === null) }],
           }
       : type === 'meal' ? { template: 'CUSTOM' }
       : type === 'water'
@@ -1282,29 +1429,36 @@ async function runCreatePlans(
     createdPlans[type] = plan;
 
     if (type === 'workout') {
-      // Assign day_of_week as the actual calendar weekday (Mon=0 … Sun=6),
-      // distributing workout days across the non-rest days of the week in order.
-      const nonRestWeekdays = [0,1,2,3,4,5,6].filter(d => !form.restDays.includes(d));
-      const workoutRows = form.workoutDays.map((day, idx) => ({
-        plan_id: plan.id,
-        day_of_week: nonRestWeekdays[idx] ?? idx,
-        name: day.name,
-        // Store in versioned format from day one so edits can append cleanly
-        exercises: [{
-          label: 'original',
-          effective_from: startDateStr,
-          exercises: day.exercises.map(ex => ({
-            exercise_id: ex.id,
-            sets: ex.sets,
-            reps: ex.metric_type === 'reps' ? ex.reps : 0,
-            rest_seconds: 90,
-            metric_type: ex.metric_type ?? 'reps',
-            duration_seconds: ex.duration_seconds ?? null,
-            distance_meters: ex.distance_meters ?? null,
-          })),
-        }],
-      }));
-      await supabase.from('workouts').insert(workoutRows);
+      // Build workout rows from explicit weekAssignments: each assigned slot maps to a day_of_week.
+      const workoutRows = form.weekAssignments
+        .map((dayIdx, weekday) => {
+          if (dayIdx === null) return null;
+          const day = form.workoutDays[dayIdx];
+          if (!day) return null;
+          return {
+            plan_id: plan.id,
+            day_of_week: weekday,
+            name: day.name,
+            // Store in versioned format from day one so edits can append cleanly
+            exercises: [{
+              label: 'original',
+              effective_from: startDateStr,
+              exercises: day.exercises.map(ex => ({
+                exercise_id: ex.id,
+                sets: ex.sets,
+                reps: ex.metric_type === 'reps' ? ex.reps : 0,
+                rest_seconds: 90,
+                metric_type: ex.metric_type ?? 'reps',
+                duration_seconds: ex.duration_seconds ?? null,
+                distance_meters: ex.distance_meters ?? null,
+              })),
+            }],
+          };
+        })
+        .filter(Boolean);
+      if (workoutRows.length > 0) {
+        await supabase.from('workouts').insert(workoutRows);
+      }
     }
     if (type === 'meal') {
       const slots = form.mealSlots.map((slot, idx) => ({
@@ -1614,7 +1768,7 @@ interface PlanGroup {
   /** one Plan row per category that belongs to this group */
   plans: Plan[];
 }
-interface ScreenData { weekDays: WeekDay[]; skipTotal: number; skipUsed: number; historyGroups: PlanGroup[]; allWorkoutRows: any[]; planStartDate: string | null; planEndDate: string | null; }
+interface ScreenData { weekDays: WeekDay[]; skipTotal: number; skipUsed: number; historyGroups: PlanGroup[]; allWorkoutRows: any[]; planStartDate: string | null; planEndDate: string | null; partialLogDates: Set<string>; }
 
 interface WorkoutDayDetail { name: string; exercises: { name: string; sets: number; reps: number }[]; }
 interface MealSlotDetail  { name: string; time: string; type: string; }
@@ -1658,13 +1812,13 @@ export default function PlanManagementScreen() {
     waterGoalGlasses: 8,
     sleepGoalHours: 8,
     startDate: defaultStartDate,
-    restDays: [] as number[],  // 0=Mon … 6=Sun (ISO week order)
+    weekAssignments: new Array(7).fill(null) as (number | null)[],  // index=weekday (0=Mon…6=Sun), value=workoutDays index or null (rest)
   };
   const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
   const [screenData, setScreenData] = useState<ScreenData>({
-    weekDays: [], skipTotal: 2, skipUsed: 0, historyGroups: [], allWorkoutRows: [], planStartDate: null, planEndDate: null,
+    weekDays: [], skipTotal: 2, skipUsed: 0, historyGroups: [], allWorkoutRows: [], planStartDate: null, planEndDate: null, partialLogDates: new Set(),
   });
   const [expandedCats, setExpandedCats] = useState<string[]>([]);
   const [catDetails, setCatDetails] = useState<CatDetails>({ loadingCats: new Set() });
@@ -1765,7 +1919,7 @@ export default function PlanManagementScreen() {
     if (currentStepId === 'name')           return form.name.trim().length > 0;
     if (currentStepId === 'categories')     return form.categories.length > 0;
     if (currentStepId === 'split')          return !!form.split;
-    if (currentStepId === 'configureDays')  return true;
+    if (currentStepId === 'configureDays')  return form.weekAssignments.some(v => v !== null);
     if (currentStepId === 'configureMeals') return form.mealSlots.length > 0 && form.mealSlots.every(sl => sl.name.trim().length > 0);
     if (currentStepId === 'configureWater') return true;
     if (currentStepId === 'configureSleep') return true;
@@ -1796,12 +1950,18 @@ export default function PlanManagementScreen() {
 
       const { data: logs } = await supabase
         .from('workout_logs')
-        .select('logged_at')
+        .select('logged_at, exercise_id')
         .eq('user_id', user.id)
         .gte('logged_at', monday.toISOString())
         .lte('logged_at', sunday.toISOString());
 
-      const logDates = new Set((logs ?? []).map((l: any) => new Date(l.logged_at).toDateString()));
+      const logsByDate = new Map<string, Set<string>>();
+      for (const l of logs ?? []) {
+        const ds = new Date(l.logged_at).toDateString();
+        if (!logsByDate.has(ds)) logsByDate.set(ds, new Set());
+        logsByDate.get(ds)!.add(l.exercise_id);
+      }
+      const logDates = new Set(logsByDate.keys());
 
       // Fetch the active workout plan fresh from DB (avoids stale closure issues)
       let allWorkoutRows: any[] = [];
@@ -1832,6 +1992,17 @@ export default function PlanManagementScreen() {
       const activeRestDays = new Set<number>(planRestDays);
       // Helper: JS getDay (Sun=0) → Mon=0 … Sun=6
       const toMonZero = (jsDow: number) => jsDow === 0 ? 6 : jsDow - 1;
+
+      // Compute which logged dates are only partially complete (some exercises, not all)
+      const partialLogDates = new Set<string>();
+      for (const [ds, exIds] of logsByDate) {
+        const weekday = toMonZero(new Date(ds).getDay());
+        const row = allWorkoutRows.find((w: any) => w.day_of_week === weekday);
+        const plannedCount = row ? getActiveVersion(row.exercises ?? []).length : 0;
+        if (plannedCount > 0 && exIds.size < plannedCount) {
+          partialLogDates.add(ds);
+        }
+      }
 
       const weekDays: WeekDay[] = DAY_LABELS.map((label, i) => {
         const date = new Date(monday);
@@ -1867,6 +2038,7 @@ export default function PlanManagementScreen() {
           date,
           isToday: date.toDateString() === today.toDateString(),
           hasLog: logDates.has(date.toDateString()),
+          isPartialLog: partialLogDates.has(date.toDateString()),
           isFuture: date > today,
           isRestDay,
           plannedWorkoutName,
@@ -1917,6 +2089,7 @@ export default function PlanManagementScreen() {
         allWorkoutRows,
         planStartDate,
         planEndDate,
+        partialLogDates,
       });
     } catch (e) {
       console.error('Plan screen load error:', e);
@@ -1928,14 +2101,14 @@ export default function PlanManagementScreen() {
   useEffect(() => { loadScreenData(); }, [loadScreenData]);
 
   // When the number of workout days changes (days added/removed in ConfigureDays),
-  // reset rest days so the user is forced to re-pick them on the schedule step.
+  // reset weekAssignments so stale slot assignments don't reference out-of-bounds indices.
   // We track the previous count via a ref to avoid clearing on initial mount.
   const prevWorkoutDayCountRef = useRef<number | null>(null);
   useEffect(() => {
     if (!creating) { prevWorkoutDayCountRef.current = null; return; }
     const count = form.workoutDays.length;
     if (prevWorkoutDayCountRef.current !== null && prevWorkoutDayCountRef.current !== count) {
-      setForm(f => ({ ...f, restDays: [] }));
+      setForm(f => ({ ...f, weekAssignments: new Array(7).fill(null) }));
     }
     prevWorkoutDayCountRef.current = count;
   }, [form.workoutDays.length, creating]);
@@ -1975,12 +2148,11 @@ export default function PlanManagementScreen() {
 
     // Hydrate workout days from latest version
     let workoutDays: WorkoutDayConfig[] = [];
-    let restDays: number[] = [];
+    let weekAssignments: (number | null)[] = new Array(7).fill(null);
     let splitId = '';
 
     if (workoutPlan) {
       const cfg = workoutPlan.config ?? {};
-      restDays = getActiveConfigValue(cfg.rest_day_versions, 'rest_days') ?? cfg.rest_days ?? [];
       splitId = cfg.split === 'CUSTOM' ? 'custom'
         : cfg.split === 'PPL' ? 'ppl'
         : cfg.split === 'UPPER_LOWER' ? 'ul'
@@ -2026,6 +2198,12 @@ export default function PlanManagementScreen() {
             };
           }),
         }));
+        // Reconstruct weekAssignments: slot index = day_of_week, value = workoutDays array index
+        workoutRows.forEach((row: any, idx: number) => {
+          if (row.day_of_week >= 0 && row.day_of_week <= 6) {
+            weekAssignments[row.day_of_week] = idx;
+          }
+        });
       }
 
       // Always treat as custom when editing — the exercises are already hydrated
@@ -2065,7 +2243,7 @@ export default function PlanManagementScreen() {
       waterGoalGlasses,
       sleepGoalHours,
       startDate,
-      restDays,
+      weekAssignments,
     });
     setStep(0);
     setIsEditing(true);
@@ -2097,7 +2275,7 @@ export default function PlanManagementScreen() {
     for (const plan of siblingPlans) {
       if (plan.type === 'workout') {
         const cfg = plan.config ?? {};
-        const newRestDays = f.restDays;
+        const newRestDays = [0,1,2,3,4,5,6].filter(d => f.weekAssignments[d] === null);
         const currentVersions: any[] = cfg.rest_day_versions ?? [];
         const latestRestDays = getActiveConfigValue(currentVersions, 'rest_days') ?? cfg.rest_days ?? [];
         const restDaysChanged = JSON.stringify([...newRestDays].sort()) !== JSON.stringify([...latestRestDays].sort());
@@ -2125,17 +2303,18 @@ export default function PlanManagementScreen() {
           : f.split === 'boxing' ? 'BOXING'
           : f.split === 'running' ? 'RUNNING'
           : 'CUSTOM';
-        const nonRestWeekdays = [0,1,2,3,4,5,6].filter(d => !f.restDays.includes(d));
-
         const { data: existingRows } = await supabase
           .from('workouts')
           .select('id, day_of_week, exercises')
           .eq('plan_id', plan.id)
           .order('day_of_week', { ascending: true });
 
-        for (let idx = 0; idx < f.workoutDays.length; idx++) {
-          const day = f.workoutDays[idx];
-          const calWeekday = nonRestWeekdays[idx] ?? idx;
+        for (let weekday = 0; weekday < 7; weekday++) {
+          const dayIdx = f.weekAssignments[weekday];
+          if (dayIdx === null) continue;
+          const day = f.workoutDays[dayIdx];
+          if (!day) continue;
+          const calWeekday = weekday;
           const existingRow = (existingRows ?? []).find((r: any) => r.day_of_week === calWeekday);
 
           if (isActive && existingRow) {
@@ -2267,7 +2446,7 @@ export default function PlanManagementScreen() {
       // Custom split: seed empty days so ConfigureDays has something to render
       if (currentStepId === 'split' && form.split === 'custom' && form.workoutDays.length === 0) {
         const days: WorkoutDayConfig[] = Array.from({ length: DEFAULT_DAY_COUNT }, (_, i) => ({
-          name: `Day ${i + 1}`, exercises: [],
+          name: `Workout ${i + 1}`, exercises: [],
         }));
         setForm(f => ({ ...f, workoutDays: days }));
       }
@@ -2489,6 +2668,8 @@ export default function PlanManagementScreen() {
                   days={form.workoutDays}
                   onChange={days => setForm(f => ({ ...f, workoutDays: days }))}
                   userId={user?.id ?? ''}
+                  weekAssignments={form.weekAssignments}
+                  onWeekAssignmentsChange={a => setForm(f => ({ ...f, weekAssignments: a }))}
                 />
               )}
               {currentStepId === 'configureMeals' && <ConfigureMeals slots={form.mealSlots} onChange={slots => setForm(f => ({ ...f, mealSlots: slots }))} />}
@@ -2498,12 +2679,9 @@ export default function PlanManagementScreen() {
               {currentStepId === 'schedule'      && (
                 <Step_Schedule
                   startDate={form.startDate}
-                  restDays={form.restDays}
-                  trainingDayCount={form.workoutDays.length}
                   currentPlanEndDate={!isEditing && activePlans.workout?.end_date ? new Date(activePlans.workout.end_date) : undefined}
                   currentPlanName={!isEditing ? activePlans.workout?.name : undefined}
                   onStartDate={d => setForm(f => ({ ...f, startDate: d }))}
-                  onRestDays={r => setForm(f => ({ ...f, restDays: r }))}
                   lockStartDate={isEditing && (() => { const p = activePlans.workout ?? activePlans.meal ?? activePlans.water ?? activePlans.sleep; return p?.status === 'active'; })()}
                 />
               )}
@@ -2605,16 +2783,17 @@ export default function PlanManagementScreen() {
                     {dataLoading ? (
                       <ActivityIndicator color={C.orange} size="small" style={{ marginVertical: 16 }} />
                     ) : (
-                      <WeekViewStrip
-                        activePlan={activePlans.workout ?? null}
-                        allWorkoutRows={screenData.allWorkoutRows}
-                        planStartDate={screenData.planStartDate}
-                        planEndDate={screenData.planEndDate}
-                        scheduledPlans={scheduledPlans}
-                        currentWeekLogDates={new Set(screenData.weekDays.filter(d => d.hasLog).map(d => d.date.toDateString()))}
-                        onDayPress={d => setSelectedDay(d)}
-                        userId={user?.id ?? ''}
-                      />
+<WeekViewStrip
+  activePlan={activePlans.workout ?? null}
+  allWorkoutRows={screenData.allWorkoutRows}
+  planStartDate={screenData.planStartDate}
+  planEndDate={screenData.planEndDate}
+  scheduledPlans={scheduledPlans}
+  currentWeekLogDates={new Set(screenData.weekDays.filter(d => d.hasLog).map(d => d.date.toDateString()))}
+  partialLogDates={screenData.partialLogDates}
+  onDayPress={d => setSelectedDay(d)}
+  userId={user?.id ?? ''}
+/>
                     )}
 
                     {/* Started / Ends */}
@@ -3033,6 +3212,58 @@ const s = StyleSheet.create({
     color: C.white, fontSize: 14, fontWeight: '600',
   },
   dayHint: { color: '#333', fontSize: 11, marginTop: 14, fontStyle: 'italic' },
+
+  // ── Week Slot Strip ──
+  weekSlotContainer: {
+    flexDirection: 'row', position: 'relative', marginBottom: 20, marginTop: 4,
+  },
+  weekSlotCol: {
+    alignItems: 'center', gap: 6,
+  },
+  weekSlotLabel: {
+    color: '#555', fontSize: 9, fontWeight: '700', letterSpacing: 0.5,
+  },
+  weekSlotCard: {
+    width: '92%', aspectRatio: 1, borderRadius: 10, borderWidth: 1.5, borderColor: C.orange + '55',
+    backgroundColor: C.orange + '0F',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  weekSlotCardDragging: {
+    opacity: 0.25,
+  },
+  weekSlotCardHovered: {
+    borderColor: C.orange, backgroundColor: C.orange + '22',
+  },
+  weekSlotBadge: {
+    width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.orange,
+  },
+  weekSlotBadgeText: { color: '#000', fontSize: 13, fontWeight: '900' },
+  weekSlotUnassign: {
+    position: 'absolute', top: 3, right: 3,
+  },
+  weekSlotEmpty: {
+    width: '92%', aspectRatio: 1, borderRadius: 10, borderWidth: 1.5,
+    borderStyle: 'dashed', borderColor: '#2A2A2C',
+    alignItems: 'center', justifyContent: 'center', gap: 3,
+  },
+  weekSlotEmptyHovered: {
+    borderColor: C.orange + '88', backgroundColor: C.orange + '08',
+  },
+  weekSlotRestLabel: {
+    color: '#333', fontSize: 8, fontWeight: '700', letterSpacing: 0.5,
+  },
+  weekSlotGhost: {
+    position: 'absolute', zIndex: 100,
+    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 12, shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  weekSlotSectionLabel: {
+    color: '#444', fontSize: 10, fontWeight: '700', letterSpacing: 1, marginTop: 20, marginBottom: 4,
+  },
+  weekSlotSectionHint: {
+    color: '#333', fontSize: 11, fontStyle: 'italic', marginBottom: 10,
+  },
 
   // ── Configure Days ──
   dayCard: {

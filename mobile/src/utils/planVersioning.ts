@@ -20,8 +20,20 @@
 export function getActiveVersion(exercises: any[], forDate?: string): any[] {
   if (!exercises || exercises.length === 0) return [];
   if (exercises[0]?.label !== undefined) {
-    const dateStr = forDate ?? new Date().toISOString().split('T')[0];
-    const eligible = exercises.filter((v: any) => v.effective_from <= dateStr);
+    // Build a comparable ISO string. New edits use full datetimes; old entries and
+    // forDate callers may use date-only strings. Normalise both so comparisons work:
+    //   - date-only forDate ("2026-03-08")  → treat as end of that day
+    //   - no forDate                        → current instant
+    let compareTo: string;
+    if (forDate) {
+      compareTo = forDate.includes('T') ? forDate : `${forDate}T23:59:59.999Z`;
+    } else {
+      compareTo = new Date().toISOString();
+    }
+    // A date-only effective_from ("2026-03-08") compares correctly because
+    // "2026-03-08" < "2026-03-08T..." lexicographically — it is always eligible
+    // for any compareTo that is on or after that date.
+    const eligible = exercises.filter((v: any) => v.effective_from <= compareTo);
     if (eligible.length === 0) return exercises[0].exercises ?? [];
     eligible.sort((a: any, b: any) => b.effective_from.localeCompare(a.effective_from));
     return eligible[0].exercises ?? [];

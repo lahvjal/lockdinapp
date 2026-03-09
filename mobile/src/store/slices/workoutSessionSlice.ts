@@ -7,12 +7,16 @@ export type RestMode   = 'strict' | 'flexible';
 export type SetStatus  = 'pending' | 'active' | 'resting' | 'done';
 export type SessionStatus = 'idle' | 'setup' | 'active' | 'complete';
 
+export type MetricType = 'reps' | 'duration' | 'distance';
+
 export interface SetLog {
   setNumber: number;
   targetReps: number;
+  targetDurationSeconds: number; // 0 when metric is reps
   weightValue: number;
   weightUnit: WeightUnit;
   repsCompleted: number | null;
+  durationCompleted: number | null; // seconds elapsed for timed sets
   restSecondsTaken: number | null;
   isPR: boolean;
   status: SetStatus;
@@ -27,6 +31,8 @@ export interface ExerciseSession {
   muscle: string;
   targetSets: number;
   targetReps: number;
+  targetDurationSeconds: number; // 0 when metric is reps
+  metricType: MetricType;
   targetRestSeconds: number;
   sets: SetLog[];
   isAddedOnFly: boolean;
@@ -73,13 +79,15 @@ export interface WorkoutSessionState {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeSet(setNumber: number, targetReps: number): SetLog {
+function makeSet(setNumber: number, targetReps: number, targetDurationSeconds = 0): SetLog {
   return {
     setNumber,
     targetReps,
+    targetDurationSeconds,
     weightValue: 0,
     weightUnit: 'lb',
     repsCompleted: null,
+    durationCompleted: null,
     restSecondsTaken: null,
     isPR: false,
     status: 'pending',
@@ -132,6 +140,7 @@ const workoutSessionSlice = createSlice({
       exercises: Array<{
         exerciseId: string; name: string; muscle: string;
         targetSets: number; targetReps: number; targetRestSeconds: number;
+        metricType?: MetricType; targetDurationSeconds?: number;
       }>;
       weightUnit: WeightUnit;
       barWeightLb: number;
@@ -149,6 +158,7 @@ const workoutSessionSlice = createSlice({
         weight_value: number;
         weight_unit: string;
         reps_completed: number | null;
+        duration_completed: number | null;
         rest_seconds_taken: number | null;
         is_pr: boolean;
       }> }>;
@@ -175,6 +185,9 @@ const workoutSessionSlice = createSlice({
         const fullyDone = idx < startFromExerciseIdx; // all sets logged
         const partiallyDone = !fullyDone && loggedSetCount > 0 && loggedSetCount < ex.targetSets;
 
+        const mt = ex.metricType ?? 'reps';
+        const durSec = ex.targetDurationSeconds ?? 0;
+
         const sets = Array.from({ length: ex.targetSets }, (_, i) => {
           const setData = sortedSetsData[i];
 
@@ -183,9 +196,11 @@ const workoutSessionSlice = createSlice({
             return {
               setNumber: i + 1,
               targetReps: ex.targetReps,
+              targetDurationSeconds: durSec,
               weightValue: setData?.weight_value ?? 0,
               weightUnit: (setData?.weight_unit ?? weightUnit) as WeightUnit,
               repsCompleted: setData?.reps_completed ?? null,
+              durationCompleted: setData?.duration_completed ?? null,
               restSecondsTaken: setData?.rest_seconds_taken ?? null,
               isPR: setData?.is_pr ?? false,
               status: 'done' as SetStatus,
@@ -196,7 +211,7 @@ const workoutSessionSlice = createSlice({
           }
 
           // Pending set — not yet logged
-          return { ...makeSet(i + 1, ex.targetReps) };
+          return { ...makeSet(i + 1, ex.targetReps, durSec) };
         });
 
         // For the partially-done exercise, the active set is the first pending one
@@ -207,6 +222,8 @@ const workoutSessionSlice = createSlice({
 
         return {
           ...ex,
+          metricType: mt,
+          targetDurationSeconds: durSec,
           sets,
           isAddedOnFly: false,
           logId: log?.logId ?? null,
@@ -231,15 +248,20 @@ const workoutSessionSlice = createSlice({
       state.restMode = action.payload.restMode;
       state.isResuming = false;
       if (!state.startedAt) {
-        // Fresh session — record start time and activate first set
         state.startedAt = Date.now();
-        if (state.exercises.length > 0) {
-          state.exercises[0].sets[0].status = 'active';
-          state.exercises[0].sets[0].startedAt = Date.now();
+        // Activate the correct set based on where openSetup left off.
+        // For a fresh workout:  activeExerciseIdx=0, activeSetIdx=0 (both pending).
+        // For a continued workout: these point to the first un-logged set, which
+        // is still 'pending' — DO NOT fall back to [0][0] which may already be 'done'.
+        const ex = state.exercises[state.activeExerciseIdx];
+        const s = ex?.sets[state.activeSetIdx];
+        if (s && s.status === 'pending') {
+          s.status = 'active';
+          s.startedAt = Date.now();
         }
       }
-      // If startedAt is already set (resumed session), exercise state is intact —
-      // don't touch it, just flip status to active.
+      // If startedAt is already set (crash-restored session via restoreSession),
+      // exercise state is fully intact — don't touch it.
     },
 
     endSession(state) {
@@ -333,8 +355,36 @@ const workoutSessionSlice = createSlice({
         });
       }
 
-      // Check if all sets for this exercise are done
-      const allDone = ex.sets.every((set, idx) => idx <= setIdx ? true : set.status !== 'active');
+      // Start rest timer
+      state.isResting = true;
+      state.restStartedAt = Date.now();
+      state.restTargetSeconds = ex.targetRestSeconds;
+
+      // Pre-mark next set as upcoming
+      const nextSetIdx = setIdx + 1;
+      if (nextSetIdx < ex.sets.length) {
+        state.activeSetIdx = nextSetIdx;
+      }
+    },
+
+    completeTimedSet(state, action: PayloadAction<{
+      exIdx: number;
+      setIdx: number;
+      durationCompleted: number; // seconds the user held the set
+      logId: string;
+    }>) {
+      const { exIdx, setIdx, durationCompleted, logId } = action.payload;
+      const ex = state.exercises[exIdx];
+      if (!ex) return;
+      const s = ex.sets[setIdx];
+      if (!s) return;
+
+      s.status = 'resting';
+      s.durationCompleted = durationCompleted;
+      s.isPR = false;
+      s.completedAt = Date.now();
+      s.restStartedAt = Date.now();
+      ex.logId = logId;
 
       // Start rest timer
       state.isResting = true;
@@ -409,14 +459,17 @@ const workoutSessionSlice = createSlice({
     addExerciseOnFly(state, action: PayloadAction<{
       exerciseId: string; name: string; muscle: string;
       targetSets: number; targetReps: number;
+      metricType?: MetricType; targetDurationSeconds?: number;
     }>) {
-      const { targetSets, targetReps, ...rest } = action.payload;
+      const { targetSets, targetReps, metricType = 'reps', targetDurationSeconds = 0, ...rest } = action.payload;
       state.exercises.push({
         ...rest,
         targetSets,
         targetReps,
+        metricType,
+        targetDurationSeconds,
         targetRestSeconds: 90,
-        sets: Array.from({ length: targetSets }, (_, i) => makeSet(i + 1, targetReps)),
+        sets: Array.from({ length: targetSets }, (_, i) => makeSet(i + 1, targetReps, targetDurationSeconds)),
         isAddedOnFly: true,
         logId: null,
         previousBestLb: null,
@@ -453,7 +506,7 @@ const workoutSessionSlice = createSlice({
 export const {
   openSetup, startSession, endSession, discardSession, clearSession, restoreSession,
   setWeightUnit, setBarWeight, setRestMode, setActiveExercise,
-  updateSetWeight, updateNextSetWeight, completeSet, finishRest, skipRest, addRestTime,
+  updateSetWeight, updateNextSetWeight, completeSet, completeTimedSet, finishRest, skipRest, addRestTime,
   addExerciseOnFly, setExerciseLogId, setPreviousBest,
 } = workoutSessionSlice.actions;
 

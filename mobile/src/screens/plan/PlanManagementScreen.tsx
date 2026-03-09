@@ -483,6 +483,229 @@ function WeekSlotStrip({ weekAssignments, workoutDays, onTapSlot, onSwap, onUnas
   );
 }
 
+// ─── Duration Picker ──────────────────────────────────────────────────────────
+
+const DP_ITEM_H = 50;
+const DP_VISIBLE = 5;
+const DP_H = DP_ITEM_H * DP_VISIBLE;
+const SEC_STEPS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+function WheelColumn({ items, initIndex, onSettle }: {
+  items: string[];
+  initIndex: number;
+  onSettle: (idx: number) => void;
+}) {
+  const scrollRef = useRef<any>(null);
+  const settled = useRef(initIndex);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: initIndex * DP_ITEM_H, animated: false });
+    }, 60);
+    return () => clearTimeout(t);
+  }, []);
+
+  const clamp = (i: number) => Math.max(0, Math.min(items.length - 1, i));
+
+  return (
+    <View style={{ height: DP_H, overflow: 'hidden' }}>
+      {/* Selection highlight */}
+      <View pointerEvents="none" style={dpStyles.highlight} />
+      <ScrollView
+        ref={scrollRef}
+        style={{ flex: 1 }}
+        snapToInterval={DP_ITEM_H}
+        decelerationRate="fast"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingVertical: DP_ITEM_H * 2 }}
+        onMomentumScrollEnd={e => {
+          const idx = clamp(Math.round(e.nativeEvent.contentOffset.y / DP_ITEM_H));
+          settled.current = idx;
+          onSettle(idx);
+        }}
+        onScrollEndDrag={e => {
+          // Handles slow drags that stop without momentum
+          const idx = clamp(Math.round(e.nativeEvent.contentOffset.y / DP_ITEM_H));
+          settled.current = idx;
+          onSettle(idx);
+        }}
+      >
+        {items.map((label, i) => (
+          <View key={i} style={dpStyles.item}>
+            <Text style={dpStyles.itemText}>{label}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+function DurationPickerModal({ visible, initialSeconds, onConfirm, onClose }: {
+  visible: boolean;
+  initialSeconds: number;
+  onConfirm: (seconds: number) => void;
+  onClose: () => void;
+}) {
+  const initMins = Math.floor(initialSeconds / 60);
+  const initSecIdx = Math.max(0, SEC_STEPS.indexOf(Math.round((initialSeconds % 60) / 5) * 5));
+
+  const minsRef = useRef(initMins);
+  const secsRef = useRef(initSecIdx);
+
+  // Reset refs when modal opens with a new value
+  useEffect(() => {
+    if (visible) {
+      minsRef.current = Math.floor(initialSeconds / 60);
+      const nearestSecIdx = SEC_STEPS.indexOf(Math.round((initialSeconds % 60) / 5) * 5 as any);
+      secsRef.current = nearestSecIdx >= 0 ? nearestSecIdx : 0;
+    }
+  }, [visible, initialSeconds]);
+
+  const minItems = Array.from({ length: 60 }, (_, i) => String(i));
+  const secItems = SEC_STEPS.map(s => s.toString().padStart(2, '0'));
+
+  const handleConfirm = () => {
+    const total = minsRef.current * 60 + SEC_STEPS[secsRef.current];
+    onConfirm(Math.max(5, total));
+    onClose();
+  };
+
+  const initSecIdxClamped = Math.max(0, SEC_STEPS.findIndex(s => s >= (initialSeconds % 60))) ;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" presentationStyle="overFullScreen">
+      <View style={dpStyles.overlay}>
+        <View style={dpStyles.sheet}>
+          <View style={dpStyles.header}>
+            <Text style={dpStyles.title}>SET DURATION</Text>
+            <TouchableOpacity onPress={onClose}>
+              <MaterialCommunityIcons name="close" size={20} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={dpStyles.wheels}>
+            {/* Minutes wheel */}
+            <View style={dpStyles.wheelWrap}>
+              <WheelColumn
+                items={minItems}
+                initIndex={initMins}
+                onSettle={idx => { minsRef.current = idx; }}
+              />
+              <Text style={dpStyles.unitLabel}>min</Text>
+            </View>
+
+            <Text style={dpStyles.colon}>:</Text>
+
+            {/* Seconds wheel */}
+            <View style={dpStyles.wheelWrap}>
+              <WheelColumn
+                items={secItems}
+                initIndex={initSecIdxClamped}
+                onSettle={idx => { secsRef.current = idx; }}
+              />
+              <Text style={dpStyles.unitLabel}>sec</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity style={dpStyles.confirmBtn} onPress={handleConfirm} activeOpacity={0.85}>
+            <Text style={dpStyles.confirmBtnText}>SET DURATION</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const dpStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: '#000000BB', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#0F0F11', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 44 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 },
+  title: { color: '#F5F5F5', fontSize: 14, fontWeight: '800', letterSpacing: 1 },
+  wheels: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 28 },
+  wheelWrap: { alignItems: 'center', gap: 8, flex: 1 },
+  highlight: {
+    position: 'absolute',
+    top: DP_ITEM_H * 2,
+    left: 0, right: 0,
+    height: DP_ITEM_H,
+    backgroundColor: '#F59E0B18',
+    borderTopWidth: 1, borderBottomWidth: 1,
+    borderColor: '#F59E0B55',
+    borderRadius: 10,
+    zIndex: 1,
+  },
+  item: { height: DP_ITEM_H, alignItems: 'center', justifyContent: 'center' },
+  itemText: { color: '#F5F5F5', fontSize: 28, fontWeight: '700' },
+  unitLabel: { color: '#666', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+  colon: { color: '#F59E0B', fontSize: 32, fontWeight: '900', marginTop: -16 },
+  confirmBtn: { backgroundColor: '#F59E0B', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+  confirmBtnText: { color: '#000', fontSize: 14, fontWeight: '900', letterSpacing: 0.5 },
+});
+
+// ─── Number Picker (sets / reps / distance) ───────────────────────────────────
+
+function NumberPickerModal({ visible, title, unit, items, values, initialValue, onConfirm, onClose }: {
+  visible: boolean;
+  title: string;
+  unit?: string;
+  items: string[];
+  values: number[];
+  initialValue: number;
+  onConfirm: (value: number) => void;
+  onClose: () => void;
+}) {
+  const initIdx = Math.max(0, values.indexOf(initialValue));
+  const pickedIdx = useRef(initIdx);
+
+  useEffect(() => {
+    if (visible) {
+      pickedIdx.current = Math.max(0, values.indexOf(initialValue));
+    }
+  }, [visible, initialValue]);
+
+  const handleConfirm = () => {
+    onConfirm(values[pickedIdx.current]);
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" presentationStyle="overFullScreen">
+      <View style={dpStyles.overlay}>
+        <View style={dpStyles.sheet}>
+          <View style={dpStyles.header}>
+            <Text style={dpStyles.title}>{title}</Text>
+            <TouchableOpacity onPress={onClose}>
+              <MaterialCommunityIcons name="close" size={20} color="#666" />
+            </TouchableOpacity>
+          </View>
+          <View style={dpStyles.wheels}>
+            <View style={dpStyles.wheelWrap}>
+              <WheelColumn
+                items={items}
+                initIndex={initIdx}
+                onSettle={idx => { pickedIdx.current = idx; }}
+              />
+              {unit ? <Text style={dpStyles.unitLabel}>{unit}</Text> : null}
+            </View>
+          </View>
+          <TouchableOpacity style={dpStyles.confirmBtn} onPress={handleConfirm} activeOpacity={0.85}>
+            <Text style={dpStyles.confirmBtnText}>{title}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const NP_SETS_VALUES  = Array.from({ length: 20 }, (_, i) => i + 1);
+const NP_SETS_ITEMS   = NP_SETS_VALUES.map(String);
+const NP_REPS_VALUES  = Array.from({ length: 100 }, (_, i) => i + 1);
+const NP_REPS_ITEMS   = NP_REPS_VALUES.map(String);
+const NP_DIST_VALUES  = Array.from({ length: 100 }, (_, i) => (i + 1) * 100);
+const NP_DIST_ITEMS   = NP_DIST_VALUES.map(m => m >= 1000 ? `${(m / 1000).toFixed(1).replace(/\.0$/, '')} km` : `${m} m`);
+
+const npTapStyle = { textDecorationLine: 'underline' as const, textDecorationStyle: 'dotted' as const };
+
 // ─── Configure Days (Workout) ─────────────────────────────────────────────────
 
 // Helper: format seconds as "1m 30s" or "45s"
@@ -540,6 +763,8 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
   const [displayList, setDisplayList] = useState<ExerciseRow[]>([]);
   const [searching, setSearching] = useState(false);
   const [creatingCustom, setCreatingCustom] = useState(false);
+  const [durationPicker, setDurationPicker] = useState<{ dayIdx: number; exIdx: number; seconds: number } | null>(null);
+  const [numberPicker, setNumberPicker] = useState<{ dayIdx: number; exIdx: number; field: 'sets' | 'reps' | 'distance_meters'; value: number } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadCategory = useCallback(async (cat: string) => {
@@ -644,6 +869,26 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
       exercises: d.exercises.map((ex, j) => j !== exIdx ? ex : {
         ...ex,
         [field]: Math.max(minVal, ((ex[field] as number) ?? 0) + delta * step),
+      }),
+    }));
+  };
+
+  const setDurationDirect = (dayIdx: number, exIdx: number, seconds: number) => {
+    onChange(days.map((d, i) => i !== dayIdx ? d : {
+      ...d,
+      exercises: d.exercises.map((ex, j) => j !== exIdx ? ex : {
+        ...ex,
+        duration_seconds: seconds,
+      }),
+    }));
+  };
+
+  const setFieldDirect = (dayIdx: number, exIdx: number, field: 'sets' | 'reps' | 'distance_meters', value: number) => {
+    onChange(days.map((d, i) => i !== dayIdx ? d : {
+      ...d,
+      exercises: d.exercises.map((ex, j) => j !== exIdx ? ex : {
+        ...ex,
+        [field]: value,
       }),
     }));
   };
@@ -792,7 +1037,12 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
                         <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'sets', -1)} style={s.counterBtn}>
                           <Text style={s.counterBtnText}>−</Text>
                         </TouchableOpacity>
-                        <Text style={s.counterVal}>{ex.sets}</Text>
+                        <TouchableOpacity
+                          onPress={() => setNumberPicker({ dayIdx, exIdx, field: 'sets', value: ex.sets })}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[s.counterVal, npTapStyle]}>{ex.sets}</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'sets', 1)} style={s.counterBtn}>
                           <Text style={s.counterBtnText}>+</Text>
                         </TouchableOpacity>
@@ -806,7 +1056,12 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
                             <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'reps', -1)} style={s.counterBtn}>
                               <Text style={s.counterBtnText}>−</Text>
                             </TouchableOpacity>
-                            <Text style={s.counterVal}>{ex.reps}</Text>
+                            <TouchableOpacity
+                              onPress={() => setNumberPicker({ dayIdx, exIdx, field: 'reps', value: ex.reps })}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[s.counterVal, npTapStyle]}>{ex.reps}</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'reps', 1)} style={s.counterBtn}>
                               <Text style={s.counterBtnText}>+</Text>
                             </TouchableOpacity>
@@ -819,7 +1074,12 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
                             <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'duration_seconds', -1)} style={s.counterBtn}>
                               <Text style={s.counterBtnText}>−</Text>
                             </TouchableOpacity>
-                            <Text style={[s.counterVal, { minWidth: 36 }]}>{fmtDuration(ex.duration_seconds ?? 60)}</Text>
+                            <TouchableOpacity
+                              onPress={() => setDurationPicker({ dayIdx, exIdx, seconds: ex.duration_seconds ?? 60 })}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[s.counterVal, { minWidth: 36, textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>{fmtDuration(ex.duration_seconds ?? 60)}</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'duration_seconds', 1)} style={s.counterBtn}>
                               <Text style={s.counterBtnText}>+</Text>
                             </TouchableOpacity>
@@ -832,7 +1092,12 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
                             <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'distance_meters', -1)} style={s.counterBtn}>
                               <Text style={s.counterBtnText}>−</Text>
                             </TouchableOpacity>
-                            <Text style={[s.counterVal, { minWidth: 44 }]}>{fmtDistance(ex.distance_meters ?? 400)}</Text>
+                            <TouchableOpacity
+                              onPress={() => setNumberPicker({ dayIdx, exIdx, field: 'distance_meters', value: ex.distance_meters ?? 400 })}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[s.counterVal, npTapStyle, { minWidth: 44 }]}>{fmtDistance(ex.distance_meters ?? 400)}</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity onPress={() => updateField(dayIdx, exIdx, 'distance_meters', 1)} style={s.counterBtn}>
                               <Text style={s.counterBtnText}>+</Text>
                             </TouchableOpacity>
@@ -961,6 +1226,40 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
       )}
 
       <Text style={s.dayHint}>Exercises are optional — you can always update from the workout screen.</Text>
+
+      {durationPicker && (
+        <DurationPickerModal
+          visible
+          initialSeconds={durationPicker.seconds}
+          onConfirm={secs => setDurationDirect(durationPicker.dayIdx, durationPicker.exIdx, secs)}
+          onClose={() => setDurationPicker(null)}
+        />
+      )}
+
+      {numberPicker && (() => {
+        const { field, value } = numberPicker;
+        const isSets = field === 'sets';
+        const isDist = field === 'distance_meters';
+        const title  = isSets ? 'SET SETS' : isDist ? 'SET DISTANCE' : 'SET REPS';
+        const items  = isSets ? NP_SETS_ITEMS  : isDist ? NP_DIST_ITEMS  : NP_REPS_ITEMS;
+        const values = isSets ? NP_SETS_VALUES : isDist ? NP_DIST_VALUES : NP_REPS_VALUES;
+        const unit   = isSets ? 'sets' : isDist ? '' : 'reps';
+        const nearest = isDist
+          ? values.reduce((best, v, i, arr) => Math.abs(v - value) < Math.abs(arr[best] - value) ? i : best, 0)
+          : values.indexOf(value) >= 0 ? values.indexOf(value) : 0;
+        return (
+          <NumberPickerModal
+            visible
+            title={title}
+            unit={unit}
+            items={items}
+            values={values}
+            initialValue={values[nearest]}
+            onConfirm={v => setFieldDirect(numberPicker.dayIdx, numberPicker.exIdx, field, v)}
+            onClose={() => setNumberPicker(null)}
+          />
+        );
+      })()}
     </View>
   );
 }
@@ -1523,7 +1822,7 @@ function DayDetailModal({ day, allWorkoutRows, userId, planId, onClose }: DayDet
     ? allWorkoutRows.find((w: any) => w.day_of_week === day.planDayIdx) ?? null
     : null;
   const dayDateStr = day?.date.toISOString().split('T')[0];
-  const plannedExercises: { exercise_id: string; sets: number; reps: number }[] =
+  const plannedExercises: { exercise_id: string; sets: number; reps: number; metric_type?: string; duration_seconds?: number; distance_meters?: number }[] =
     getActiveVersion(plannedRow?.exercises ?? [], dayDateStr);
 
   useEffect(() => {
@@ -1734,13 +2033,41 @@ function DayDetailModal({ day, allWorkoutRows, userId, planId, onClose }: DayDet
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={[s.modalExName, isDone && { color: '#666' }]} numberOfLines={1}>{name}</Text>
-                            <Text style={s.modalExTarget}>{ex.sets}×{ex.reps} target</Text>
+                            <Text style={s.modalExTarget}>{ex.sets}×{(() => {
+                              if (ex.metric_type === 'duration' && ex.duration_seconds) {
+                                const m = Math.floor(ex.duration_seconds / 60);
+                                const sc = ex.duration_seconds % 60;
+                                if (m > 0 && sc > 0) return `${m}m ${sc}s`;
+                                if (m > 0) return `${m}min`;
+                                return `${sc}sec`;
+                              }
+                              if (ex.metric_type === 'distance' && ex.distance_meters) {
+                                return ex.distance_meters >= 1000
+                                  ? `${(ex.distance_meters / 1000).toFixed(1).replace(/\.0$/, '')}km`
+                                  : `${ex.distance_meters}m`;
+                              }
+                              return ex.reps;
+                            })()} target</Text>
                           </View>
                           {!day.isFuture && completedSets.length > 0 && (
                             <Text style={s.modalExLogged}>{completedSets.length}/{ex.sets} sets</Text>
                           )}
                           {day.isFuture && (
-                            <Text style={s.modalExFuture}>{ex.sets}×{ex.reps}</Text>
+                            <Text style={s.modalExFuture}>{ex.sets}×{(() => {
+                              if (ex.metric_type === 'duration' && ex.duration_seconds) {
+                                const m = Math.floor(ex.duration_seconds / 60);
+                                const sc = ex.duration_seconds % 60;
+                                if (m > 0 && sc > 0) return `${m}m ${sc}s`;
+                                if (m > 0) return `${m}min`;
+                                return `${sc}sec`;
+                              }
+                              if (ex.metric_type === 'distance' && ex.distance_meters) {
+                                return ex.distance_meters >= 1000
+                                  ? `${(ex.distance_meters / 1000).toFixed(1).replace(/\.0$/, '')}km`
+                                  : `${ex.distance_meters}m`;
+                              }
+                              return ex.reps;
+                            })()}</Text>
                           )}
                         </View>
                       );
@@ -1770,7 +2097,7 @@ interface PlanGroup {
 }
 interface ScreenData { weekDays: WeekDay[]; skipTotal: number; skipUsed: number; historyGroups: PlanGroup[]; allWorkoutRows: any[]; planStartDate: string | null; planEndDate: string | null; partialLogDates: Set<string>; }
 
-interface WorkoutDayDetail { name: string; exercises: { name: string; sets: number; reps: number }[]; }
+interface WorkoutDayDetail { name: string; exercises: { name: string; sets: number; reps: number; metric_type?: string; duration_seconds?: number; distance_meters?: number }[]; }
 interface MealSlotDetail  { name: string; time: string; type: string; }
 interface CatDetails {
   workout?: WorkoutDayDetail[];
@@ -1858,6 +2185,9 @@ export default function PlanManagementScreen() {
                 name: nameMap[ex.exercise_id] ?? 'Exercise',
                 sets: ex.sets ?? 3,
                 reps: ex.reps ?? 8,
+                metric_type: ex.metric_type,
+                duration_seconds: ex.duration_seconds,
+                distance_meters: ex.distance_meters,
               })),
             });
           }
@@ -2138,13 +2468,19 @@ export default function PlanManagementScreen() {
     const [sy, sm, sd] = rawStart.split('-').map(Number);
     const startDate = new Date(sy, sm - 1, sd);
 
-    // Derive duration mode back to a form id
-    const durationMode = anyPlan.duration_mode ?? 'indefinite';
+    // Reverse-map DB duration_mode → form duration id.
+    // DB stores: 'indefinite' | 'fixed' | 'check_in'
+    // Form uses: 'indefinite' | '4w' | '8w' | '12w' | 'checkin'
+    const dbDurationMode = anyPlan.duration_mode ?? 'indefinite';
     let duration = 'indefinite';
-    if (durationMode === '4w') duration = '4w';
-    else if (durationMode === '8w') duration = '8w';
-    else if (durationMode === '12w') duration = '12w';
-    else if (durationMode === 'checkin') duration = 'checkin';
+    if (dbDurationMode === 'check_in') {
+      duration = 'checkin';
+    } else if (dbDurationMode === 'fixed' && anyPlan.end_date && anyPlan.start_date) {
+      const startMs = new Date(anyPlan.start_date).getTime();
+      const endMs   = new Date(anyPlan.end_date).getTime();
+      const days = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)) + 1;
+      duration = days <= 28 ? '4w' : days <= 56 ? '8w' : '12w';
+    }
 
     // Hydrate workout days from latest version
     let workoutDays: WorkoutDayConfig[] = [];
@@ -2252,6 +2588,10 @@ export default function PlanManagementScreen() {
 
   const runEditPlan = useCallback(async (userId: string, f: typeof defaultForm) => {
     const todayStr = new Date().toISOString().split('T')[0];
+    // Full ISO datetime used as effective_from for edit versions — ensures each
+    // save creates a unique, ordered entry and that getActiveVersion picks the
+    // latest one correctly even when multiple edits happen on the same calendar day.
+    const nowISO = new Date().toISOString();
     // Fetch the current sibling plans by their IDs
     const { data: siblingPlans } = await supabase
       .from('plans')
@@ -2262,13 +2602,18 @@ export default function PlanManagementScreen() {
     const anyPlan = siblingPlans[0];
     const isActive = anyPlan.status === 'active';
 
-    // Recalculate end_date if duration changed
-    const durationMap: Record<string, number> = { '4w': 28, '8w': 56, '12w': 84 };
-    const durationMode = f.duration;
+    // Map form duration id → DB duration_mode value (must satisfy plans_duration_mode_check).
+    // DB constraint allows: 'indefinite' | 'fixed' | 'check_in'
+    const durationMode = f.duration === 'checkin' ? 'check_in'
+      : f.duration === 'indefinite' ? 'indefinite'
+      : 'fixed'; // '4w' | '8w' | '12w' all become 'fixed'
+
+    // Recalculate end_date for fixed-length plans
+    const fixedWeeks = f.duration === '4w' ? 4 : f.duration === '8w' ? 8 : f.duration === '12w' ? 12 : null;
     let endDate: string | null = null;
-    if (durationMode !== 'indefinite' && durationMode !== 'checkin' && durationMap[durationMode]) {
+    if (fixedWeeks) {
       const s = new Date(f.startDate);
-      s.setDate(s.getDate() + durationMap[durationMode] - 1);
+      s.setDate(s.getDate() + fixedWeeks * 7 - 1);
       endDate = s.toISOString().split('T')[0];
     }
 
@@ -2290,12 +2635,14 @@ export default function PlanManagementScreen() {
         // Remove legacy flat field to keep config clean
         delete updatedConfig.rest_days;
 
-        await supabase
+        const { error: planUpdateError } = await supabase
           .from('plans')
           .update({ name: f.name, duration_mode: durationMode, end_date: endDate, config: updatedConfig })
           .eq('id', plan.id);
+        if (planUpdateError) throw planUpdateError;
 
-        // Update workout rows exercises — only touch unlocked (future) days for active plans
+        // Update workout rows exercises
+
         const isCustomSplit = f.split === 'custom';
         const splitKey = f.split === 'ppl' ? 'PPL'
           : f.split === 'ul' ? 'UPPER_LOWER'
@@ -2303,26 +2650,20 @@ export default function PlanManagementScreen() {
           : f.split === 'boxing' ? 'BOXING'
           : f.split === 'running' ? 'RUNNING'
           : 'CUSTOM';
-        const { data: existingRows } = await supabase
+        const { data: existingRows, error: fetchError } = await supabase
           .from('workouts')
           .select('id, day_of_week, exercises')
           .eq('plan_id', plan.id)
           .order('day_of_week', { ascending: true });
+        if (fetchError) throw fetchError;
 
         for (let weekday = 0; weekday < 7; weekday++) {
           const dayIdx = f.weekAssignments[weekday];
-          if (dayIdx === null) continue;
+          if (dayIdx === null || dayIdx === undefined) continue;
           const day = f.workoutDays[dayIdx];
           if (!day) continue;
           const calWeekday = weekday;
           const existingRow = (existingRows ?? []).find((r: any) => r.day_of_week === calWeekday);
-
-          if (isActive && existingRow) {
-            // Determine if today's weekday matches this workout day — if so it's locked
-            const jsDow = new Date().getDay();
-            const todayWeekday = jsDow === 0 ? 6 : jsDow - 1;
-            if (calWeekday < todayWeekday) continue; // past day this week — locked
-          }
 
           const newExercises = day.exercises.map(ex => ({
             exercise_id: ex.id,
@@ -2339,22 +2680,35 @@ export default function PlanManagementScreen() {
             const isAlreadyVersioned = prevVersions.length > 0 && prevVersions[0]?.label !== undefined;
             let updatedExercises: any[];
             if (isAlreadyVersioned) {
-              updatedExercises = [...prevVersions, { label: `edit-${todayStr}`, effective_from: todayStr, exercises: newExercises }];
+              // Count existing edit versions to build a sequential label (edit-1, edit-2, …).
+              // Use full ISO datetime so each save is uniquely ordered and getActiveVersion
+              // always picks the newest one via lexicographic sort.
+              const editCount = prevVersions.filter((v: any) => v.label?.startsWith('edit')).length;
+              updatedExercises = [
+                ...prevVersions,
+                { label: `edit-${editCount + 1}`, effective_from: nowISO, exercises: newExercises },
+              ];
             } else {
+              // Legacy flat format — wrap existing exercises as 'original' and append edit.
               updatedExercises = [
                 { label: 'original', effective_from: anyPlan.start_date?.split('T')[0] ?? todayStr, exercises: prevVersions },
-                { label: `edit-${todayStr}`, effective_from: todayStr, exercises: newExercises },
+                { label: 'edit-1', effective_from: nowISO, exercises: newExercises },
               ];
             }
-            await supabase.from('workouts').update({ name: day.name, exercises: updatedExercises }).eq('id', existingRow.id);
+            const { error: updateError } = await supabase
+              .from('workouts')
+              .update({ name: day.name, exercises: updatedExercises })
+              .eq('id', existingRow.id);
+            if (updateError) throw updateError;
           } else {
             // New workout day added — insert as versioned
-            await supabase.from('workouts').insert({
+            const { error: insertError } = await supabase.from('workouts').insert({
               plan_id: plan.id,
               day_of_week: calWeekday,
               name: day.name,
               exercises: [{ label: 'original', effective_from: todayStr, exercises: newExercises }],
             });
+            if (insertError) throw insertError;
           }
         }
 
@@ -2938,13 +3292,30 @@ export default function PlanManagementScreen() {
                                   {day.exercises.length > 0 ? `${day.exercises.length} exercise${day.exercises.length !== 1 ? 's' : ''}` : 'Rest'}
                                 </Text>
                               </View>
-                              {day.exercises.map((ex, ei) => (
-                                <View key={ei} style={s.catDetailExRow}>
-                                  <View style={[s.catDetailExDot, { backgroundColor: cat.color + '50' }]} />
-                                  <Text style={s.catDetailExName} numberOfLines={1}>{ex.name}</Text>
-                                  <Text style={s.catDetailExMeta}>{ex.sets}×{ex.reps}</Text>
-                                </View>
-                              ))}
+                              {day.exercises.map((ex, ei) => {
+                                const metricSuffix = (() => {
+                                  if (ex.metric_type === 'duration' && ex.duration_seconds) {
+                                    const m = Math.floor(ex.duration_seconds / 60);
+                                    const s = ex.duration_seconds % 60;
+                                    if (m > 0 && s > 0) return `${m}m ${s}s`;
+                                    if (m > 0) return `${m}min`;
+                                    return `${s}sec`;
+                                  }
+                                  if (ex.metric_type === 'distance' && ex.distance_meters) {
+                                    return ex.distance_meters >= 1000
+                                      ? `${(ex.distance_meters / 1000).toFixed(1).replace(/\.0$/, '')}km`
+                                      : `${ex.distance_meters}m`;
+                                  }
+                                  return `${ex.reps}`;
+                                })();
+                                return (
+                                  <View key={ei} style={s.catDetailExRow}>
+                                    <View style={[s.catDetailExDot, { backgroundColor: cat.color + '50' }]} />
+                                    <Text style={s.catDetailExName} numberOfLines={1}>{ex.name}</Text>
+                                    <Text style={s.catDetailExMeta}>{ex.sets}×{metricSuffix}</Text>
+                                  </View>
+                                );
+                              })}
                             </View>
                           ))}
                         </View>

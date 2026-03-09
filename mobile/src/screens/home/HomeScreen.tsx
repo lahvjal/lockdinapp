@@ -224,6 +224,8 @@ function DashboardScreen() {
       targetSets: ex.sets ?? 3,
       targetReps: ex.reps ?? 8,
       targetRestSeconds: ex.rest_seconds ?? 90,
+      metricType: (ex.metric_type ?? 'reps') as 'reps' | 'duration' | 'distance',
+      targetDurationSeconds: ex.duration_seconds ?? 0,
     }));
 
     // Find the first exercise not yet fully logged today — start from there.
@@ -632,17 +634,34 @@ function DashboardScreen() {
                   </View>
                 )}
                 {exercises.map((ex: any, i: number) => {
-                  const done = !isRestDay && data.completedExerciseIds.includes(ex.exercise_id);
+                  const log = data.completedExerciseLogs[ex.exercise_id];
+                  const loggedSets = log?.setsData?.length ?? 0;
+                  const fullyDone = !isRestDay && loggedSets >= (ex.sets ?? 1);
+                  const partial   = !isRestDay && loggedSets > 0 && !fullyDone;
                   const name = data.exerciseNames[ex.exercise_id] ?? 'Exercise';
-                  const meta = ex.weight
-                    ? `${ex.sets}×${ex.reps} @ ${ex.weight}lb`
-                    : `${ex.sets}×${ex.reps}`;
+                  const metricSuffix = (() => {
+                    if (ex.metric_type === 'duration' && ex.duration_seconds) {
+                      const m = Math.floor(ex.duration_seconds / 60);
+                      const s = ex.duration_seconds % 60;
+                      if (m > 0 && s > 0) return `${m}m ${s}s`;
+                      if (m > 0) return `${m}min`;
+                      return `${s}sec`;
+                    }
+                    if (ex.metric_type === 'distance' && ex.distance_meters) {
+                      return ex.distance_meters >= 1000
+                        ? `${(ex.distance_meters / 1000).toFixed(1).replace(/\.0$/, '')}km`
+                        : `${ex.distance_meters}m`;
+                    }
+                    return ex.weight ? `${ex.reps} @ ${ex.weight}lb` : `${ex.reps}`;
+                  })();
+                  const meta = `${ex.sets}×${metricSuffix}`;
                   return (
                     <View key={ex.exercise_id ?? i} style={[styles.exerciseRow, i > 0 && styles.exerciseRowBorder]}>
-                      <View style={[styles.checkbox, done && styles.checkboxDone]}>
-                        {done && <MaterialCommunityIcons name="check" size={11} color="#000" />}
+                      <View style={[styles.checkbox, fullyDone && styles.checkboxDone, partial && styles.checkboxPartial]}>
+                        {fullyDone && <MaterialCommunityIcons name="check" size={11} color="#000" />}
+                        {partial   && <View style={styles.checkboxDot} />}
                       </View>
-                      <Text style={[styles.exerciseName, done && styles.exerciseNameDone]} numberOfLines={1}>
+                      <Text style={[styles.exerciseName, (fullyDone || partial) && styles.exerciseNameDone]} numberOfLines={1}>
                         {name}
                       </Text>
                       <Text style={styles.exerciseMeta}>{meta}</Text>
@@ -1113,6 +1132,16 @@ const styles = StyleSheet.create({
   checkboxDone: {
     backgroundColor: C.orange,
     borderColor: C.orange,
+  },
+  checkboxPartial: {
+    borderColor: C.orange,
+    backgroundColor: 'transparent',
+  },
+  checkboxDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: C.orange,
   },
   exerciseName: {
     flex: 1,

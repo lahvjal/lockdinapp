@@ -11,10 +11,10 @@ import { RootState } from '../../store/store';
 import {
   startSession, endSession, discardSession, clearSession,
   setRestMode, setWeightUnit, setBarWeight,
-  updateSetWeight, completeSet, finishRest, skipRest, addRestTime,
+  updateSetWeight, completeSet, completeTimedSet, finishRest, skipRest, addRestTime,
   addExerciseOnFly, setExerciseLogId, setPreviousBest,
   setActiveExercise,
-  type WeightUnit, type RestMode, type ExerciseSession, type SetLog,
+  type WeightUnit, type RestMode, type ExerciseSession, type SetLog, type MetricType,
 } from '../../store/slices/workoutSessionSlice';
 import { supabase } from '../../services/supabase';
 
@@ -302,6 +302,194 @@ function RestTimerBar() {
   );
 }
 
+// ─── Set Timer Row (for duration-based exercises) ────────────────────────────
+
+interface SetTimerRowProps {
+  set: SetLog;
+  exIdx: number;
+  setIdx: number;
+  isResting: boolean;
+}
+
+function SetTimerRow({ set, exIdx, setIdx, isResting }: SetTimerRowProps) {
+  const dispatch = useDispatch();
+  const session = useSelector((s: RootState) => s.workoutSession);
+  const { user } = useSelector((s: RootState) => s.auth);
+
+  const targetSec = set.targetDurationSeconds || 60;
+  const [timerActive, setTimerActive] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startedAtRef = useRef<number | null>(null);
+
+  // Is this the set being pre-staged during rest?
+  const isNextDuringRest = isResting
+    && set.status === 'pending'
+    && exIdx === session.activeExerciseIdx
+    && setIdx === session.activeSetIdx;
+
+  useEffect(() => {
+    if (!timerActive) return;
+    const iv = setInterval(() => {
+      const e = Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000);
+      setElapsed(e);
+      // When countdown hits 0, vibrate but keep running (user taps to log)
+      if (e === targetSec) {
+        Vibration.vibrate([0, 200, 100, 200, 100, 200]);
+      }
+    }, 200);
+    return () => clearInterval(iv);
+  }, [timerActive, targetSec]);
+
+  const handleStart = () => {
+    startedAtRef.current = Date.now();
+    setElapsed(0);
+    setTimerActive(true);
+  };
+
+  const handleLogSet = async () => {
+    setTimerActive(false);
+    const durationSec = elapsed;
+
+    const ex = session.exercises[exIdx];
+    let logId = ex.logId ?? '';
+
+    if (user && ex && session.workoutId && session.sessionId) {
+      const setsData = ex.sets
+        .filter(s => s.status === 'done' || s.status === 'resting')
+        .map(s => ({
+          set_number: s.setNumber,
+          weight_value: 0,
+          weight_unit: 'lb',
+          reps_completed: null,
+          duration_completed: s.durationCompleted,
+          rest_seconds_taken: s.restSecondsTaken,
+          is_pr: false,
+        }));
+      setsData.push({
+        set_number: set.setNumber,
+        weight_value: 0,
+        weight_unit: 'lb',
+        reps_completed: null,
+        duration_completed: durationSec,
+        rest_seconds_taken: null,
+        is_pr: false,
+      });
+      setsData.sort((a, b) => a.set_number - b.set_number);
+
+      if (logId) {
+        await supabase.from('workout_logs').update({ sets_data: setsData }).eq('id', logId);
+      } else {
+        const { data: newLog } = await supabase.from('workout_logs').insert({
+          user_id: user.id,
+          workout_id: session.workoutId,
+          exercise_id: ex.exerciseId,
+          session_id: session.sessionId,
+          sets_data: setsData,
+        }).select('id').single();
+        if (newLog?.id) {
+          logId = newLog.id;
+          dispatch(setExerciseLogId({ exIdx, logId: newLog.id }));
+        }
+      }
+    }
+
+    dispatch(completeTimedSet({ exIdx, setIdx, durationCompleted: durationSec, logId }));
+    setElapsed(0);
+  };
+
+  // ── Pending (not next-during-rest) ─────────────────────────────────────────
+  if (set.status === 'pending' && !isNextDuringRest) {
+    return (
+      <View style={sr.row}>
+        <View style={sr.numBox}><Text style={sr.num}>{set.setNumber}</Text></View>
+        <Text style={sr.pending}>—</Text>
+        <Text style={sr.pending}>{fmtTime(targetSec)}</Text>
+      </View>
+    );
+  }
+
+  // ── Pending next-during-rest ────────────────────────────────────────────────
+  if (set.status === 'pending' && isNextDuringRest) {
+    return (
+      <View style={sr.activeWrap}>
+        <View style={sr.activeHeader}>
+          <View style={[sr.numBox, sr.numBoxActive]}><Text style={[sr.num, { color: C.orange }]}>{set.setNumber}</Text></View>
+          <Text style={sr.activeLabel}>NEXT UP · SET {set.setNumber} · {fmtTime(targetSec)}</Text>
+        </View>
+        <View style={[sr.restConfirmedRow]}>
+          <MaterialCommunityIcons name="timer-outline" size={16} color={C.orange} />
+          <Text style={sr.restConfirmedText}>Timer ready — starts when rest ends</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Done / resting ──────────────────────────────────────────────────────────
+  if (set.status === 'done' || set.status === 'resting') {
+    const completed = set.durationCompleted ?? 0;
+    const pct = Math.min(1, completed / targetSec);
+    return (
+      <View style={[sr.row, sr.rowDone]}>
+        <View style={[sr.numBox, sr.numBoxDone]}>
+          <MaterialCommunityIcons name="check" size={12} color={C.green} />
+        </View>
+        <Text style={sr.doneWeight}>{fmtTime(completed)}</Text>
+        <Text style={sr.doneReps}>of {fmtTime(targetSec)}</Text>
+        <View style={[sr.timerDoneBar, { width: `${Math.round(pct * 100)}%` as any }]} />
+      </View>
+    );
+  }
+
+  // ── Active ──────────────────────────────────────────────────────────────────
+  const remaining = targetSec - elapsed;
+  const isOvertime = elapsed > targetSec;
+  const pct = Math.min(1, elapsed / targetSec);
+
+  if (!timerActive) {
+    return (
+      <View style={sr.activeWrap}>
+        <View style={sr.activeHeader}>
+          <View style={[sr.numBox, sr.numBoxActive]}><Text style={[sr.num, { color: C.orange }]}>{set.setNumber}</Text></View>
+          <Text style={sr.activeLabel}>SET {set.setNumber} · {fmtTime(targetSec)} TARGET</Text>
+        </View>
+        <TouchableOpacity style={sr.timerStartBtn} onPress={handleStart} activeOpacity={0.85}>
+          <MaterialCommunityIcons name="play-circle" size={22} color="#000" />
+          <Text style={sr.timerStartBtnText}>START TIMER</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={sr.activeWrap}>
+      <View style={sr.activeHeader}>
+        <View style={[sr.numBox, sr.numBoxActive]}><Text style={[sr.num, { color: C.orange }]}>{set.setNumber}</Text></View>
+        <Text style={sr.activeLabel}>
+          {isOvertime ? 'OVERTIME' : `SET ${set.setNumber} · REMAINING`}
+        </Text>
+      </View>
+
+      {/* Countdown display */}
+      <View style={sr.timerFaceWrap}>
+        <View style={[sr.timerTrack]}>
+          <View style={[sr.timerFill, {
+            width: `${Math.min(100, pct * 100)}%` as any,
+            backgroundColor: isOvertime ? C.orange : elapsed / targetSec > 0.75 ? C.green : C.blue,
+          }]} />
+        </View>
+        <Text style={[sr.timerCountdown, isOvertime && { color: C.orange }]}>
+          {isOvertime ? `+${fmtTime(elapsed - targetSec)}` : fmtTime(remaining)}
+        </Text>
+        <Text style={sr.timerElapsedLabel}>{fmtTime(elapsed)} elapsed</Text>
+      </View>
+
+      <TouchableOpacity style={sr.logBtn} onPress={handleLogSet} activeOpacity={0.85}>
+        <Text style={sr.logBtnText}>LOG SET ✓</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 // ─── Set Row ──────────────────────────────────────────────────────────────────
 
 interface SetRowProps {
@@ -311,9 +499,14 @@ interface SetRowProps {
   unit: WeightUnit;
   barWeightLb: number;
   isResting: boolean;
+  metricType: MetricType;
 }
 
-function SetRow({ set, exIdx, setIdx, unit, barWeightLb, isResting }: SetRowProps) {
+function SetRow({ set, exIdx, setIdx, unit, barWeightLb, isResting, metricType }: SetRowProps) {
+  // Route timed sets to the dedicated timer UI
+  if (metricType === 'duration') {
+    return <SetTimerRow set={set} exIdx={exIdx} setIdx={setIdx} isResting={isResting} />;
+  }
   const dispatch = useDispatch();
   const [weightInput, setWeightInput] = useState(set.weightValue > 0 ? String(set.weightValue) : '');
   const [repsInput, setRepsInput] = useState('');
@@ -646,7 +839,7 @@ function ExerciseCard({ ex, exIdx }: { ex: ExerciseSession; exIdx: number }) {
             )}
             {ex.isAddedOnFly && <View style={ec.addedBadge}><Text style={ec.addedBadgeText}>ADDED</Text></View>}
           </View>
-          <Text style={[ec.sub, isActive && { color: '#666' }]}>{ex.muscle ? `${ex.muscle} · ` : ''}{ex.targetSets} sets × {ex.targetReps} reps</Text>
+          <Text style={[ec.sub, isActive && { color: '#666' }]}>{ex.muscle ? `${ex.muscle} · ` : ''}{ex.targetSets} sets × {ex.metricType === 'duration' ? fmtTime(ex.targetDurationSeconds) : `${ex.targetReps} reps`}</Text>
         </View>
         <View style={ec.progress}>
           <Text style={[ec.progressText, doneSets === ex.targetSets && { color: C.green }]}>
@@ -668,6 +861,7 @@ function ExerciseCard({ ex, exIdx }: { ex: ExerciseSession; exIdx: number }) {
               unit={weightUnit}
               barWeightLb={barWeightLb}
               isResting={isResting}
+              metricType={ex.metricType}
             />
           ))}
         </View>
@@ -812,8 +1006,10 @@ function SummaryView({ onDone }: { onDone: () => void }) {
             <Text style={sum.exName}>{ex.name}</Text>
             {doneSets.map((s, si) => (
               <Text key={si} style={sum.exSet}>
-                Set {s.setNumber}: {s.weightValue} {s.weightUnit} × {s.repsCompleted} reps
-                {s.isPR ? ' 🏆' : ''}
+                {ex.metricType === 'duration'
+                  ? `Set ${s.setNumber}: ${fmtTime(s.durationCompleted ?? 0)} (target ${fmtTime(ex.targetDurationSeconds)})`
+                  : `Set ${s.setNumber}: ${s.weightValue} ${s.weightUnit} × ${s.repsCompleted} reps${s.isPR ? ' 🏆' : ''}`
+                }
               </Text>
             ))}
           </View>
@@ -1096,6 +1292,15 @@ const sr = StyleSheet.create({
   restConfirmedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.orange + '12', borderRadius: 11, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: C.orange + '30' },
   restConfirmedText: { flex: 1, color: C.orange, fontSize: 12, fontWeight: '600' },
   restConfirmedEdit: { color: C.textSec, fontSize: 11, fontWeight: '700', textDecorationLine: 'underline' },
+  // Timer-specific
+  timerStartBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.blue, borderRadius: 13, paddingVertical: 15 },
+  timerStartBtnText: { color: '#000', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
+  timerFaceWrap: { alignItems: 'center', gap: 6, marginBottom: 4 },
+  timerTrack: { height: 6, borderRadius: 3, backgroundColor: '#1A1A1C', overflow: 'hidden', width: '100%' },
+  timerFill: { height: '100%', borderRadius: 3 },
+  timerCountdown: { color: C.blue, fontSize: 48, fontWeight: '900', letterSpacing: -2, lineHeight: 56 },
+  timerElapsedLabel: { color: C.textSec, fontSize: 10, fontWeight: '600', letterSpacing: 0.5 },
+  timerDoneBar: { height: 3, backgroundColor: C.green + '60', borderRadius: 2 },
 });
 
 // Exercise card styles

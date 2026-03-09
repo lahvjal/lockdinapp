@@ -4,9 +4,10 @@
  * Shows Mon–Sun as icon cells with week navigation (← THIS WEEK →), a legend,
  * and calls onDayPress when a cell is tapped.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
+  PanResponder, Animated,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../services/supabase';
@@ -89,6 +90,36 @@ export default function WeekViewStrip({
   const [weekOffset, setWeekOffset] = useState(0);
   const [days, setDays] = useState<WeekDay[]>([]);
   const [loading, setLoading] = useState(false);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const weekOffsetRef = useRef(weekOffset);
+  useEffect(() => { weekOffsetRef.current = weekOffset; }, [weekOffset]);
+
+  const slideToWeek = useCallback((direction: 'left' | 'right', nextOffset: number) => {
+    const outX = direction === 'left' ? -300 : 300;
+    const inX  = direction === 'left' ?  300 : -300;
+    Animated.timing(translateX, { toValue: outX, duration: 150, useNativeDriver: true }).start(() => {
+      translateX.setValue(inX);
+      setWeekOffset(nextOffset);
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }).start();
+    });
+  }, [translateX]);
+
+  const slideToWeekRef = useRef(slideToWeek);
+  useEffect(() => { slideToWeekRef.current = slideToWeek; }, [slideToWeek]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, { dx, dy }) =>
+        Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5,
+      onPanResponderRelease: (_, { dx }) => {
+        if (dx < -50) {
+          slideToWeekRef.current('left', weekOffsetRef.current + 1);
+        } else if (dx > 50) {
+          slideToWeekRef.current('right', weekOffsetRef.current - 1);
+        }
+      },
+    })
+  ).current;
 
   const buildWeek = useCallback(async () => {
     setLoading(weekOffset > 0);
@@ -229,11 +260,11 @@ export default function WeekViewStrip({
                         `${Math.abs(weekOffset)} WEEKS AGO`;
 
   return (
-    <View style={s.root}>
+    <View style={s.root} {...panResponder.panHandlers}>
       {/* ── Week nav header ── */}
       <View style={s.navRow}>
         <TouchableOpacity
-          onPress={() => setWeekOffset(o => o - 1)}
+          onPress={() => slideToWeek('right', weekOffset - 1)}
           style={s.navBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -252,7 +283,7 @@ export default function WeekViewStrip({
         </View>
 
         <TouchableOpacity
-          onPress={() => setWeekOffset(o => o + 1)}
+          onPress={() => slideToWeek('left', weekOffset + 1)}
           style={s.navBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -264,7 +295,7 @@ export default function WeekViewStrip({
       {loading ? (
         <ActivityIndicator color={C.orange} size="small" style={{ marginVertical: 12 }} />
       ) : (
-        <View style={s.daysRow}>
+        <Animated.View style={[s.daysRow, { transform: [{ translateX }] }]}>
           {days.map((d, i) => (
             <TouchableOpacity
               key={i}
@@ -304,7 +335,7 @@ export default function WeekViewStrip({
               </View>
             </TouchableOpacity>
           ))}
-        </View>
+        </Animated.View>
       )}
 
       {/* ── Back to now ── */}

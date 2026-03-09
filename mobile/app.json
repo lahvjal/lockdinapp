@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "LockdIn",
-    "slug": "lockdin-app",
+    "name": "TINO",
+    "slug": "tino-app",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,10 +13,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lockdin.app",
+      "bundleIdentifier": "com.tino.app",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSHealthShareUsageDescription": "LockdIn needs access to read your health data to track workouts and sync sleep information.",
-        "NSHealthUpdateUsageDescription": "LockdIn needs access to write workout data to your Health app."
+        "NSHealthShareUsageDescription": "TINO needs access to read your health data to track workouts and sync sleep information.",
+        "NSHealthUpdateUsageDescription": "TINO needs access to write workout data to your Health app.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -25,15 +27,26 @@
         "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.lockdin.app"
+      "package": "com.tino.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "lockdinapp",
+    "scheme": "tinoapp",
     "plugins": [
       "expo-secure-store",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "9603637d-cbb7-42c3-b5f4-7ede4a2b1f07"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/9603637d-cbb7-42c3-b5f4-7ede4a2b1f07"
+    }
   }
 }

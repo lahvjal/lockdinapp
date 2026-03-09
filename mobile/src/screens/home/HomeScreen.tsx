@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -164,12 +165,13 @@ function CategoryCard({
 
 // ─── Dashboard Tab ────────────────────────────────────────────────────────────
 
-function DashboardScreen() {
+function DashboardScreen({ navigation }: { navigation?: any }) {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const { activePlans, scheduledPlans } = useSelector((state: RootState) => state.plan);
   const { streaks, completionPercentage } = useSelector((state: RootState) => state.streak);
   const workoutSession = useSelector((state: RootState) => state.workoutSession);
+  const hasAnyPlan = !!(activePlans.workout || activePlans.meal || activePlans.water || activePlans.sleep);
 
   // True when there's an in-progress session for today's workout (resumed after crash)
   const hasActiveSession = workoutSession.isResuming && workoutSession.status === 'setup';
@@ -254,9 +256,12 @@ function DashboardScreen() {
   const todayStr = today.toISOString().split('T')[0];
 
   const loadData = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      console.log('[Dashboard] loadData skipped — no user');
+      return;
+    }
+    console.log('[Dashboard] loadData starting, activePlans:', Object.keys(activePlans).filter(k => !!(activePlans as any)[k]));
     try {
-      // Profile
       const { data: profile } = await supabase
         .from('user_profiles')
         .select('full_name')
@@ -453,6 +458,7 @@ function DashboardScreen() {
         }
       }
 
+      console.log('[Dashboard] loadData complete — todayWorkout:', todayWorkout?.name ?? 'none', '| meals:', mealSlotsCount, '| water glasses:', waterGlasses);
       setData({
         userName,
         todayWorkout,
@@ -473,7 +479,7 @@ function DashboardScreen() {
         loading: false,
       });
     } catch (err) {
-      console.error('Dashboard load error:', err);
+      console.error('[Dashboard] loadData error:', err);
       setData(prev => ({ ...prev, loading: false }));
     }
   }, [user, activePlans, dayOfWeek, todayStr]);
@@ -547,7 +553,7 @@ function DashboardScreen() {
         {/* ── Header ── */}
         <View style={styles.header}>
           <View style={styles.headerSide} />
-          <Text style={styles.appTitle}>LOCKDIN</Text>
+          <Image source={require('../../../assets/logo.png')} style={styles.headerLogo} resizeMode="contain" />
           <TouchableOpacity style={styles.headerSide} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <Text style={styles.menuDots}>• • •</Text>
           </TouchableOpacity>
@@ -569,6 +575,26 @@ function DashboardScreen() {
             <Text style={styles.streakLabel}>DAY{'\n'}STREAK</Text>
           </View>
         </View>
+
+        {/* ── No Plan Empty State ── */}
+        {!hasAnyPlan && (
+          <View style={styles.noPlanBanner}>
+            <View style={styles.noPlanIconWrap}>
+              <MaterialCommunityIcons name="clipboard-plus-outline" size={32} color={C.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.noPlanTitle}>No active plan</Text>
+              <Text style={styles.noPlanSub}>Set up your workout, meals, water and sleep goals.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.noPlanBtn}
+              onPress={() => navigation?.navigate('Plan', { autoCreate: true })}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.noPlanBtnText}>CREATE</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* ── Plan Banner ── */}
         {workoutPlan && (
@@ -890,11 +916,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   headerSide: { width: 44 },
-  appTitle: {
-    color: C.orange,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 3,
+  headerLogo: {
+    height: 22,
+    width: 100,
   },
   menuDots: {
     color: C.textSec,
@@ -964,6 +988,32 @@ const styles = StyleSheet.create({
   },
 
   // Plan Banner
+  noPlanBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: C.orange + '0D',
+    borderWidth: 1,
+    borderColor: C.orange + '33',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  noPlanIconWrap: {
+    width: 52, height: 52, borderRadius: 14,
+    backgroundColor: C.orange + '1A',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  noPlanTitle: { color: C.white, fontSize: 14, fontWeight: '800', marginBottom: 2 },
+  noPlanSub: { color: C.textSec, fontSize: 12, lineHeight: 16 },
+  noPlanBtn: {
+    backgroundColor: C.orange,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  noPlanBtnText: { color: '#000', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+
   planBanner: {
     alignItems: 'center',
     marginBottom: 18,

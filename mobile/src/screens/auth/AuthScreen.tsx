@@ -41,11 +41,11 @@ export default function AuthScreen() {
     try {
       setLoading(true);
 
-      // Force lockdinapp:// scheme regardless of environment.
+      // Force tinoapp:// scheme regardless of environment.
       // ASWebAuthenticationSession (used by openAuthSessionAsync on iOS) intercepts
       // redirects to this scheme automatically — it does NOT need to be registered
       // in Info.plist. This avoids the exp://127.0.0.1 Metro-manifest problem.
-      const redirectUri = 'lockdinapp://auth/callback';
+      const redirectUri = 'tinoapp://auth/callback';
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
@@ -103,8 +103,8 @@ export default function AuthScreen() {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text variant="displayLarge" style={styles.title}>LockdIn</Text>
-          <Text variant="titleMedium" style={styles.subtitle}>Your structured habit companion</Text>
+          <Text variant="displayLarge" style={styles.title}>TINO</Text>
+          <Text variant="titleMedium" style={styles.subtitle}>Today Is Not Optional</Text>
         </View>
 
         <SegmentedButtons

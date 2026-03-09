@@ -9,7 +9,7 @@ import streakReducer from './slices/streakSlice';
 import planReducer from './slices/planSlice';
 import workoutSessionReducer from './slices/workoutSessionSlice';
 
-export const WORKOUT_SESSION_STORAGE_KEY = '@lockdin/workoutSession';
+export const WORKOUT_SESSION_STORAGE_KEY = '@tino/workoutSession';
 
 export const store = configureStore({
   reducer: {

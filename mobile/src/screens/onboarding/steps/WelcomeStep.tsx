@@ -22,7 +22,7 @@ export default function WelcomeStep({ onNext }: WelcomeStepProps) {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text variant="headlineLarge" style={styles.title}>
-        Welcome to LockdIn! 👋
+        Welcome to TINO! 👋
       </Text>
       
       <Text variant="bodyLarge" style={styles.greeting}>

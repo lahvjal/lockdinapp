@@ -71,7 +71,7 @@ export default function NotificationSettingsScreen() {
     const { scheduleNotification } = await import('../../services/notifications');
     await scheduleNotification({
       title: 'Test Notification',
-      body: 'This is a test notification from LockdIn',
+      body: 'This is a test notification from TINO',
       data: { test: true },
       trigger: { seconds: 2 },
     });
@@ -87,7 +87,7 @@ export default function NotificationSettingsScreen() {
           <Card.Content>
             <List.Item
               title="Enable Notifications"
-              description="Allow LockdIn to send you push notifications"
+              description="Allow TINO to send you push notifications"
               right={() => (
                 <Switch
                   value={notificationsEnabled}

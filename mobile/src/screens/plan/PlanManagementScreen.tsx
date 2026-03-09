@@ -763,6 +763,7 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
   const [displayList, setDisplayList] = useState<ExerciseRow[]>([]);
   const [searching, setSearching] = useState(false);
   const [creatingCustom, setCreatingCustom] = useState(false);
+  const [customExerciseModal, setCustomExerciseModal] = useState<{ dayIdx: number; name: string } | null>(null);
   const [durationPicker, setDurationPicker] = useState<{ dayIdx: number; exIdx: number; seconds: number } | null>(null);
   const [numberPicker, setNumberPicker] = useState<{ dayIdx: number; exIdx: number; field: 'sets' | 'reps' | 'distance_meters'; value: number } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -893,12 +894,18 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
     }));
   };
 
-  const createCustomExercise = async (dayIdx: number) => {
+  const createCustomExercise = (dayIdx: number) => {
     const name = searchQuery.trim();
     if (!name) return;
+    setCustomExerciseModal({ dayIdx, name });
+  };
+
+  const confirmCreateCustomExercise = async (metricType: 'reps' | 'duration' | 'distance') => {
+    if (!customExerciseModal) return;
+    const { dayIdx, name } = customExerciseModal;
+    setCustomExerciseModal(null);
     setCreatingCustom(true);
     try {
-      // Check if it already exists
       const { data: existing } = await supabase
         .from('exercises')
         .select('id, name, primary_muscle_group, equipment_category, metric_type')
@@ -923,7 +930,7 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
           is_bodyweight: false,
           is_locked: false,
           equipment_category: 'other',
-          metric_type: 'reps',
+          metric_type: metricType,
           created_by: userId,
         })
         .select('id, name, primary_muscle_group, equipment_category, metric_type')
@@ -1260,6 +1267,51 @@ function ConfigureDays({ days, onChange, userId, weekAssignments, onWeekAssignme
           />
         );
       })()}
+
+      <Modal
+        visible={!!customExerciseModal}
+        transparent
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setCustomExerciseModal(null)}
+      >
+        <View style={cmStyles.overlay}>
+          <View style={cmStyles.sheet}>
+            <View style={cmStyles.header}>
+              <Text style={cmStyles.title}>HOW IS THIS MEASURED?</Text>
+              <TouchableOpacity onPress={() => setCustomExerciseModal(null)}>
+                <MaterialCommunityIcons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            {customExerciseModal && (
+              <Text style={cmStyles.exerciseName}>"{customExerciseModal.name}"</Text>
+            )}
+            {(
+              [
+                { type: 'reps',     icon: 'counter',          label: 'Reps',     sub: 'e.g. 3 × 10 reps' },
+                { type: 'duration', icon: 'timer-outline',    label: 'Duration', sub: 'e.g. 3 × 60 seconds' },
+                { type: 'distance', icon: 'map-marker-distance', label: 'Distance', sub: 'e.g. 3 × 400 m' },
+              ] as const
+            ).map(({ type, icon, label, sub }) => (
+              <TouchableOpacity
+                key={type}
+                style={cmStyles.option}
+                onPress={() => confirmCreateCustomExercise(type)}
+                activeOpacity={0.8}
+              >
+                <View style={cmStyles.optionIcon}>
+                  <MaterialCommunityIcons name={icon as any} size={22} color="#F5A023" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={cmStyles.optionLabel}>{label}</Text>
+                  <Text style={cmStyles.optionSub}>{sub}</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={18} color="#444" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2105,7 +2157,7 @@ interface CatDetails {
   loadingCats: Set<string>;
 }
 
-export default function PlanManagementScreen() {
+export default function PlanManagementScreen({ route }: { route?: any }) {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const { activePlans, scheduledPlans } = useSelector((state: RootState) => state.plan);
@@ -2113,6 +2165,13 @@ export default function PlanManagementScreen() {
 
   const [tab, setTab] = useState<'active' | 'history'>('active');
   const [creating, setCreating] = useState(false);
+
+  // Auto-open the create wizard when navigated from the home screen empty state
+  React.useEffect(() => {
+    if (route?.params?.autoCreate && !creating) {
+      setCreating(true);
+    }
+  }, [route?.params?.autoCreate]);
   const [isEditing, setIsEditing] = useState(false);
   const [editingPlanIds, setEditingPlanIds] = useState<string[]>([]);
   const [step, setStep] = useState(0);
@@ -4143,4 +4202,41 @@ const s = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1,
   },
   historyCatPillText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+});
+
+const cmStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: '#000000BB', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#0F0F11',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 44,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  title: { color: '#F5F5F5', fontSize: 13, fontWeight: '800', letterSpacing: 1 },
+  exerciseName: { color: '#888', fontSize: 13, marginBottom: 20 },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E1E1E',
+  },
+  optionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#F5A02314',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionLabel: { color: '#F5F5F5', fontSize: 15, fontWeight: '700' },
+  optionSub: { color: '#666', fontSize: 12, marginTop: 2 },
 });
